@@ -1,0 +1,6 @@
+{
+  "name": "dummy-plugin",
+  "version": "1.0.0",
+  "description": "A dummy plugin for verification",
+  "main": "index.ts"
+}

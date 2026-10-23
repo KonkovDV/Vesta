@@ -1,0 +1,37 @@
+# Architecture
+
+One Node.js process. The process entry is `src/index.ts`. It calls `runKernel()` and exits with code 1 when that call throws. Importing the package does not listen on a port.
+
+## Chain
+
+`src/index.ts` → `src/kernel.ts` → `src/core/bootstrap/orchestrator.ts` → `src/infrastructure/di/bootstrap.ts` → `src/application/app.ts`.
+
+No other file calls `express.listen()`.
+
+## Layers
+
+| Layer | Owns |
+| --- | --- |
+| `domain` | Contracts and rules. No database driver, no HTTP server. |
+| `application` | Use cases and the HTTP application. |
+| `infrastructure` | PostgreSQL, Redis, model clients, plugins, the migration runner. |
+| `core` | DI container, configuration, bootstrap. |
+
+A project does not add a new folder inside this repository. It depends on one commit and passes a `KernelExtension`. A case that lives for weeks is the project's aggregate. The kernel stores its events, delivers its external effects through the outbox, and wakes it with a persisted cron job. See [overlays.md](overlays.md) and [adr/0003-product-placement.md](adr/0003-product-placement.md).
+
+## Mediation
+
+A tool body runs through `ToolRegistry.execute`. That method asks `IToolExecutionPolicy` and, when the decision requires approval, runs the body only if the call carries `approvalGranted`. The agent loop sets the flag after a person approves that call. A batch that receives the same decision records `ask` and skips the body. The rule for an overdue schedule lives in `overdueSlotDecision`, and the timer manager applies it. The literature and the non-claims are in [research/long-running-case.md](research/long-running-case.md).
+
+## Order at start
+
+1. Optional process handlers (`SIGTERM`, `SIGINT`, uncaught errors). On a failed start they are removed.
+2. Telemetry, then integrity checks, then configuration.
+3. Kernel DI registrations.
+4. Each extension `register`, in array order. A duplicate name, an empty name, or a token the kernel already registered throws.
+5. HTTP. Kernel routes, then extension routes, then the 404 handler.
+6. SQL is not applied here. `microphoenix-migrate` applies kernel SQL, then each `--dir`.
+
+## Package boundary
+
+`package.json` `exports` exposes the package root. A path such as `microphoenix/dist/infrastructure/...` fails with `ERR_PACKAGE_PATH_NOT_EXPORTED`. TypeScript path aliases in `dist/` are rewritten to relative paths at build time, so the installed package does not need `module-alias`.

@@ -1,0 +1,16 @@
+cff-version: 1.2.0
+title: MicroPhoenix
+message: Cite the commit you pinned and docs/claims.md. Do not cite this file as a measurement of model quality.
+type: software
+authors:
+  - family-names: Konkov
+    given-names: DV
+license: MIT
+version: 2.9.0
+date-released: "2026-10-23"
+repository-code: https://github.com/KonkovDV/Vesta
+abstract: >
+  Event-sourced server kernel published as Vesta. A product pins one commit.
+  Delivery to another system is at least once. A tool body that requires
+  approval does not run until that call carries an approval grant. Cite the
+  pinned commit and docs/claims.md. This file is not a measurement of model quality.

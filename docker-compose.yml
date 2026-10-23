@@ -1,0 +1,65 @@
+# Local stack: kernel, Postgres with pgvector, Redis.
+# Passwords here are for a developer machine only.
+services:
+  app:
+    build: .
+    restart: unless-stopped
+    env_file:
+      - docker/dev.compose.env
+    environment:
+      - JWT_SECRET=${JWT_SECRET:?set JWT_SECRET in .env}
+      - USE_MOCK_AI=${USE_MOCK_AI:-true}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      # Readiness asks the rollout manager. Without these overrides it reports the
+      # Postgres event store, Redis bus and outbox as not enabled.
+      - FF_USEREALEVENTSTORE=true
+      - FF_USEREALEVENTBUS=true
+      - FF_USEREALOUTBOX=true
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  migrate:
+    build: .
+    profiles: ["migrate"]
+    env_file:
+      - docker/dev.compose.env
+    command: ["dist/infrastructure/database/migrate-cli.js"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg15
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=microphoenix
+    # Not published on the host; the app reaches it on the compose network.
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d microphoenix"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+  redis-data:

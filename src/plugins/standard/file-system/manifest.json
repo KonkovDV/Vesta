@@ -1,0 +1,8 @@
+{
+  "name": "file-system",
+  "version": "1.0.0",
+  "description": "Provides safe file system access (Standard Library)",
+  "author": "MicroPhoenix Team",
+  "tags": ["tool", "fs", "io"],
+  "main": "index.js"
+}
