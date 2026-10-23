@@ -8,10 +8,10 @@ These rows are claims about this source tree. They are not a deployment report a
 | --- | --- | --- |
 | C1 | One process listens. `src/index.ts` calls `runKernel()`. Importing the package does not listen. | `docs/architecture.md` |
 | C2 | A product pins a 40-character commit. A branch name is not a pin. | [adr/0001-kernel-as-package.md](adr/0001-kernel-as-package.md). Installing from a remote is MP-K5 and has not been run. |
-| C3 | An overdue one-shot still runs once. A repeating job overdue past the catch-up window moves to the next slot. | `overdueSlotDecision` in `src/domain/scheduling/CronScheduleComputer.ts`, covered by `tests/unit/domain/scheduling/CronScheduleComputer.test.ts` and `tests/unit/infrastructure/scheduling/CronTimerManager.test.ts` |
-| C4 | A tool body that requires approval does not run unless the call has `approvalGranted`. The agent loop sets that flag after a recorded approval. A batch records `ask` and skips the body. | `tests/unit/application/agents/services/tool-registry.test.ts`, `tests/unit/application/agents/AgentRunService.test.ts`, `tests/unit/agents/wave-3-adapters.test.ts` |
-| C5 | The outbox delivers at least once. A crash between the bus accept and the published mark leaves the row leased, then the worker tries again. | `docs/limitations.md`. The kernel does not claim exactly-once across a network. |
-| C6 | The kernel baseline is one forward file, `001_consolidated.sql`. A matching checksum skips it. A failed file does not store a checksum. | `tests/unit/infrastructure/database/migration-runner.test.ts` |
+| C3 | This cut exports `ICronService` and `ICronJobRepository`. `runKernel()` does not start a timer. `overdueSlotDecision` is not in this tree. A one-shot wake-up is not performed here. | `src/domain/scheduling/cron-service.port.ts`. `src/kernel.ts` re-exports the port. MP-K9. |
+| C4 | A tool body that requires approval does not run unless the call has `approvalGranted`. The agent loop sets that flag after a recorded approval. A batch records `ask` and skips the body. | `src/application/agents/services/ToolRegistry.ts`, `src/application/agents/AgentRunService.ts`, `src/infrastructure/agents/BatchToolExecutorAdapter.ts`. The laboratory tests are not shipped in this repository. |
+| C5 | The outbox delivers at least once. A crash between the bus accept and the published mark leaves the row leased, then the worker tries again. | `docs/limitations.md` and `src/infrastructure/events/postgres-outbox.ts`. The kernel does not claim exactly-once across a network. |
+| C6 | The kernel baseline is one forward file, `001_consolidated.sql`. A matching checksum skips it. A failed file does not store a checksum. | `src/infrastructure/database/migrations/001_consolidated.sql` and `src/infrastructure/database/migration-runner.ts`. The laboratory test is not shipped in this repository. |
 
 ## Words that are not claims
 

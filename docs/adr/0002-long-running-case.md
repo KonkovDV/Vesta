@@ -9,7 +9,7 @@ Some products built on this kernel follow one case for weeks or months: a deadli
 
 ## Decision
 
-A case is the project's aggregate. The kernel stores its events, delivers its external effects, asks a person when the project requires it, and wakes a persisted one-shot job. The kernel's agent loop is a different object.
+A case is the project's aggregate. The kernel stores its events, delivers its external effects, and asks a person when the project requires it. This cut does not wake a job: no timer is started. The kernel's agent loop is a different object.
 
 ## Invariants
 
@@ -25,7 +25,7 @@ A case is the project's aggregate. The kernel stores its events, delivers its ex
 
 6. **Zero observed failures are not a proof.** Brown, Cai, and DasGupta (`Interval Estimation for a Binomial Proportion`, Statistical Science, 2001) show that a sample with no events still has an upper bound. This kernel does not compute that bound. A project that reports "no wrongful send in n tries" publishes the bound with the count.
 
-7. **A one-shot wake-up is not a repeating slot.** `CronSchedule` of kind `at` is one instant stored in PostgreSQL. Repeating jobs that are overdue by more than the catch-up window (one hour unless configured) move to the next slot. A one-shot has no next slot, so an overdue one-shot still runs once when the process returns. The kernel does not know which instants are statutory. The project computes the instant, including any move to the next working day.
+7. **A one-shot wake-up is not in this cut.** `ICronService` is exported. `runKernel()` does not start a timer, and `overdueSlotDecision` is not in this tree. A product that must fire at a stored instant brings its own clock. The kernel does not know which instants are statutory.
 
 8. **Approval is checked at the call that runs the tool.** Saltzer and Schroeder (*The Protection of Information in Computer Systems*, Proceedings of the IEEE, 1975) require every access to pass the check, not only a well-behaved caller. `ToolRegistry.execute` throws when `requiresApproval` is set and the call does not carry `approvalGranted`. `AgentRunService` sets that flag only after a person has approved the same call. A batch records `ask` and does not run the body. The person's decision is the project's event. A signature on a filing is that event, not the boolean. `ToolProtectionAspect` is not on this path.
 

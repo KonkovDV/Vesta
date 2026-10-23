@@ -29,7 +29,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 ## What is claimed
 
-The process entry, the pin, the outbox, the one-shot wake-up, and the approval gate are listed with their tests in [docs/claims.md](docs/claims.md). Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
+The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs `npm run typecheck` only. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
 
 ## What is not claimed
 

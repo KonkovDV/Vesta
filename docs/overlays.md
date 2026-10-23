@@ -11,7 +11,7 @@ The kernel agent loop is a short run, eight steps by default. A case that lives 
 | Facts that must survive a restart | `IEventStore`. Restore from a snapshot, then only the later events. |
 | An external send whose business effect happens once | `IOutbox`. The row is stored first. Delivery is at least once, so the project's handler is idempotent. |
 | A person must agree before an action | `IToolExecutionPolicy`. `requiresApproval` stops the tool body in `ToolRegistry` unless the call carries `approvalGranted`. A batch records `ask` and does not run that call. |
-| A wake-up at a later time | `ICronService` and `ICronJobRepository`. A one-shot (`at`) that is overdue still runs once. A repeating job overdue by more than the catch-up window moves to its next slot. |
+| A wake-up at a later time | `ICronService` and `ICronJobRepository` are exported. This cut does not start a timer and does not contain `overdueSlotDecision`. A product that needs a wake-up brings its own clock. See MP-K9. |
 | The project's own tables | `microphoenix-migrate --dir`. Those files run after the kernel baseline. |
 | The project's own HTTP routes | `KernelExtension.routes`, after the kernel routes. |
 | An outbound HTTP call | Use the kernel's SSRF guard. A new client does not inherit it. |

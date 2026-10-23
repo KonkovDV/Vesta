@@ -17,11 +17,11 @@ No other file calls `express.listen()`.
 | `infrastructure` | PostgreSQL, Redis, model clients, plugins, the migration runner. |
 | `core` | DI container, configuration, bootstrap. |
 
-A project does not add a new folder inside this repository. It depends on one commit and passes a `KernelExtension`. A case that lives for weeks is the project's aggregate. The kernel stores its events, delivers its external effects through the outbox, and wakes it with a persisted cron job. See [overlays.md](overlays.md) and [adr/0003-product-placement.md](adr/0003-product-placement.md).
+A project does not add a new folder inside this repository. It depends on one commit and passes a `KernelExtension`. A case that lives for weeks is the project's aggregate. The kernel stores its events and delivers its external effects through the outbox. It does not start a cron timer. See [overlays.md](overlays.md) and [adr/0003-product-placement.md](adr/0003-product-placement.md).
 
 ## Mediation
 
-A tool body runs through `ToolRegistry.execute`. That method asks `IToolExecutionPolicy` and, when the decision requires approval, runs the body only if the call carries `approvalGranted`. The agent loop sets the flag after a person approves that call. A batch that receives the same decision records `ask` and skips the body. The rule for an overdue schedule lives in `overdueSlotDecision`, and the timer manager applies it. The literature and the non-claims are in [research/long-running-case.md](research/long-running-case.md).
+A tool body runs through `ToolRegistry.execute`. That method asks `IToolExecutionPolicy` and, when the decision requires approval, runs the body only if the call carries `approvalGranted`. The agent loop sets the flag after a person approves that call. A batch that receives the same decision records `ask` and skips the body. This cut does not apply an overdue-schedule rule: that function is not in the tree. The literature and the non-claims are in [research/long-running-case.md](research/long-running-case.md).
 
 ## Order at start
 

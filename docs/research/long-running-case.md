@@ -37,7 +37,7 @@ Each citation is used for one design choice. None of them was re-run as an exper
 
 **A sample with no events.** Brown, Cai, and DasGupta, *Interval Estimation for a Binomial Proportion*, Statistical Science 16(2), 2001, show that a sample of successes with zero failures still has an upper bound on the failure probability. This kernel does not compute that bound. A product that reports a clean sample publishes the bound with the count.
 
-**One-shot time versus a repeating slot.** A repeating schedule can drop a missed slot and keep the next one. A one-shot cannot. `overdueSlotDecision` returns `run` for `kind: 'at'` even when the instant is older than the catch-up window and even when catch-up is disabled. Repeating kinds return `advance` past the window and `skip` when catch-up is off. The timer manager does not re-decide this. The kernel does not know which instants are statutory. The product computes the instant.
+**One-shot time versus a repeating slot.** A repeating schedule can drop a missed slot and keep the next one. A one-shot cannot. That rule was written as `overdueSlotDecision` in the laboratory tree. This published cut does not contain that file and does not start a timer. The product computes the instant and brings the clock. MP-K9.
 
 ## What this note does not establish
 

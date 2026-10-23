@@ -12,5 +12,5 @@ First cut published as a library kernel.
 - Standard plugins ship `manifest.json` (`main: index.js`). The loader reads that file from `dist/plugins` after build. A missing `index.js` falls back to `index.ts` when the sources are what is running.
 - The manifest schema and the standard plugins resolve from the package directory, not from the project working directory.
 - A failed `runKernel()` removes the process handlers installed for that attempt.
-- An overdue one-shot (`CronSchedule` kind `at`) still runs once. A repeating job overdue past the catch-up window moves to its next slot. The choice is `overdueSlotDecision`.
+- The published tree does not include `CronScheduleComputer` or a running cron timer. `ICronService` is a port only. MP-K9.
 - `ToolRegistry.execute` does not run a tool when `requiresApproval` is set unless the call has `approvalGranted`. A batch records that call as `ask` and skips the body.
