@@ -14,7 +14,7 @@ The kernel agent loop is a short run, eight steps by default. A case that lives 
 | A wake-up at a later time | `ICronService` and `ICronJobRepository` are exported. This cut does not start a timer and does not contain `overdueSlotDecision`. A product that needs a wake-up brings its own clock. See MP-K9. |
 | The project's own tables | `microphoenix-migrate --dir`. Those files run after the kernel baseline. |
 | The project's own HTTP routes | `KernelExtension.routes`, after the kernel routes. |
-| An outbound HTTP call | Use the kernel's SSRF guard. A new client does not inherit it. |
+| An outbound HTTP call | `pinUrl` binds the socket to the addresses just checked. Ingestion, x402, the container registry, outbound MCP, and A2A use it when the guard is passed in. A new client does not inherit it. A check named `isSafe` or `validateUrl` without `pinUrl` is not that bind. |
 
 Import these types from `microphoenix`. Deep paths under `microphoenix/dist` are closed.
 
@@ -32,7 +32,7 @@ Import these types from `microphoenix`. Deep paths under `microphoenix/dist` are
 2. `IToolExecutionPolicy.evaluate` returns allowed, blocked, or approval required.
 3. If approval is required, a person decides. The decision is an event.
 4. The effect is written through the outbox. The recipient and the amount come from the case, not from the outside text.
-5. A later wake-up is a cron job stored with the case id. The process may restart before it fires.
+5. A later wake-up is the project's clock. This cut exports `ICronService` and does not start a timer. MP-K9.
 
 The reasoning, the citations, and the failure model are in [adr/0002-long-running-case.md](adr/0002-long-running-case.md).
 

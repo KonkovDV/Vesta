@@ -16,4 +16,4 @@ Do not attach live credentials, `.env` files, customer databases, or production 
 
 - `JWT_SECRET` is at least 32 characters and is not the placeholder from `.env.example`.
 - Database and Redis passwords in `docker-compose.yml` are for a local machine. Replace them before the ports are reachable beyond localhost.
-- Outbound HTTP from the kernel must go through the SSRF guard. A project that adds its own HTTP client does not inherit that guard unless it calls it.
+- Outbound HTTP is pinned only where this tree calls `pinUrl` and then connects to those addresses: document ingestion, x402 settlement, container-registry GET, outbound MCP, and A2A. A project HTTP client does not inherit the guard. `validateUrl` or `isSafe` alone does not pin the socket.

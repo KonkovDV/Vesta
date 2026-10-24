@@ -1,9 +1,9 @@
 node_modules/
 dist/
-logs/
-temp/
-uploads/
-state/
+/logs/
+/temp/
+/uploads/
+/state/
 .env
 .env.*
 !.env.example

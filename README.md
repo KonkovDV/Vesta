@@ -39,9 +39,11 @@ A web client, a collections product, a measured model score, exactly-once delive
 
 - Starts one process: `src/index.ts` calls `runKernel()`.
 - Restores state from an append-only event journal.
-- Publishes through an outbox.
+- Publishes through an outbox. Delivery to another system is at least once.
 - Lets a project add services, HTTP routes, and SQL migrations without editing the kernel.
 - Refuses to replace a service the kernel already registered.
+- Stops a tool body in `ToolRegistry` when the call requires approval and does not carry `approvalGranted`.
+- Connects selected outbound HTTP calls to the addresses the SSRF guard just checked. A client a project adds does not inherit that guard.
 
 ## What it does not do
 
@@ -127,6 +129,20 @@ The only supported import is `microphoenix`. `microphoenix/dist/...` is rejected
 | `npm start` | `node dist/index.js` |
 
 The kernel baseline is one file, `001_consolidated.sql`. The second run skips it when the checksum matches. A project directory passed with `--dir` still runs after it.
+
+## Outbound HTTP
+
+When `ISsrfDnsGuard` is registered, these calls open the socket on the pinned addresses. A later DNS answer is not used for that socket. A redirect is pinned again. A redirect from HTTPS to HTTP is refused.
+
+| Call | How |
+| --- | --- |
+| Document ingestion | `selectIngestionHttpClient` |
+| x402 settlement | `pinnedExchange` |
+| Container registry GET | `pinnedExchange` when the guard has `pinUrl` |
+| Outbound MCP | `createPinnedFetch` when the guard has `pinUrl` |
+| A2A discovery, JSON-RPC, and the event stream | the same pin, passed in from DI |
+
+A validator that only answers `isSafe` or `validateUrl` still checks and then fetches. That is not a pin. The laboratory media store is not in this cut: nothing on the runtime graph constructs it. See [docs/limitations.md](docs/limitations.md).
 
 ## Development
 

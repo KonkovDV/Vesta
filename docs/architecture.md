@@ -23,6 +23,10 @@ A project does not add a new folder inside this repository. It depends on one co
 
 A tool body runs through `ToolRegistry.execute`. That method asks `IToolExecutionPolicy` and, when the decision requires approval, runs the body only if the call carries `approvalGranted`. The agent loop sets the flag after a person approves that call. A batch that receives the same decision records `ask` and skips the body. This cut does not apply an overdue-schedule rule: that function is not in the tree. The literature and the non-claims are in [research/long-running-case.md](research/long-running-case.md).
 
+## Outbound HTTP
+
+The DNS guard returns the addresses it just checked. The socket for that call uses those addresses. A redirect is checked again. A redirect from HTTPS to HTTP is refused. This applies to document ingestion, x402 settlement, a container-registry GET, outbound MCP, and A2A when the guard is passed in. A client the project adds does not inherit the guard. A check that only returns `isSafe` or `validateUrl` does not choose the socket address.
+
 ## Order at start
 
 1. Optional process handlers (`SIGTERM`, `SIGINT`, uncaught errors). On a failed start they are removed.
