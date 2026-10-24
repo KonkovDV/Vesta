@@ -16,4 +16,4 @@ Do not attach live credentials, `.env` files, customer databases, or production 
 
 - `JWT_SECRET` is at least 32 characters and is not the placeholder from `.env.example`.
 - Database and Redis passwords in `docker-compose.yml` are for a local machine. Replace them before the ports are reachable beyond localhost.
-- Outbound HTTP is pinned only where this tree calls `pinUrl` and then connects to those addresses: document ingestion, x402 settlement, container-registry GET, outbound MCP, and A2A. A project HTTP client does not inherit the guard. `validateUrl` or `isSafe` alone does not pin the socket.
+- Outbound HTTP is pinned only where this tree calls `pinUrl` and then connects to those addresses: document ingestion, x402 settlement, container-registry GET, and A2A. Outbound MCP in this tree does not pin. MP-K10. A project HTTP client does not inherit the guard. `validateUrl` or `isSafe` alone does not pin the socket.

@@ -14,4 +14,4 @@ First cut published as a library kernel.
 - A failed `runKernel()` removes the process handlers installed for that attempt.
 - The published tree does not include `CronScheduleComputer` or a running cron timer. `ICronService` is a port only. MP-K9.
 - `ToolRegistry.execute` does not run a tool when `requiresApproval` is set unless the call has `approvalGranted`. A batch records that call as `ask` and skips the body.
-- When the DNS guard can pin an address, document ingestion, x402 settlement, container-registry GET, outbound MCP, and A2A connect to those addresses. A redirect is pinned again. A check that only returns `isSafe` does not pin the socket. The laboratory media store is not in this cut.
+- When the DNS guard can pin an address, document ingestion, x402 settlement, container-registry GET, and A2A connect to those addresses. A redirect is pinned again. A check that only returns `isSafe` does not pin the socket. The laboratory media store is not in this cut. Outbound MCP in this cut does not pin. MP-K10.

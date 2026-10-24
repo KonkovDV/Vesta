@@ -139,10 +139,10 @@ When `ISsrfDnsGuard` is registered, these calls open the socket on the pinned ad
 | Document ingestion | `selectIngestionHttpClient` |
 | x402 settlement | `pinnedExchange` |
 | Container registry GET | `pinnedExchange` when the guard has `pinUrl` |
-| Outbound MCP | `createPinnedFetch` when the guard has `pinUrl` |
 | A2A discovery, JSON-RPC, and the event stream | the same pin, passed in from DI |
+| Outbound MCP | Not pinned. `McpToolConsumerAdapter` opens the SDK transport on the URL. MP-K10. |
 
-A validator that only answers `isSafe` or `validateUrl` still checks and then fetches. That is not a pin. The laboratory media store is not in this cut: nothing on the runtime graph constructs it. See [docs/limitations.md](docs/limitations.md).
+A validator that only answers `isSafe` or `validateUrl` still checks and then fetches. That is not a pin. The laboratory media store and the laboratory MCP client registry are not in this cut. See [docs/limitations.md](docs/limitations.md).
 
 ## Development
 

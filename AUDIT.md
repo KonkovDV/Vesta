@@ -20,9 +20,9 @@
 
 ## Документы после закрепления адресов
 
-Исходящий HTTP в этом срезе закреплён там, где код вызывает `pinUrl` и соединяется с этими адресами: загрузка документа, расчёт x402, GET реестра образов, исходящий MCP, обнаружение и вызов A2A. Проверка `isSafe` или `validateUrl` без `pinUrl` сокет не закрепляет. Лабораторный `SsrfSafeMediaStore` в срез не входит: граф импортов от `src/index.ts` и `src/kernel.ts` его не достигает. Это записано в README, `docs/limitations.md`, `docs/claims.md` (C7), `docs/architecture.md` и `SECURITY.md`. Значок CI означает `npm ci` и `npm run typecheck`, не прогон тестов.
+Исходящий HTTP в этом срезе закреплён там, где код вызывает `pinUrl` и соединяется с этими адресами: загрузка документа, расчёт x402, GET реестра образов, обнаружение и вызов A2A. Проверка `isSafe` или `validateUrl` без `pinUrl` сокет не закрепляет. Исходящий MCP в этом срезе — `McpToolConsumerAdapter`: SSE и streamable HTTP идут транспортом SDK по URL, без `pinUrl` (MP-K10). Лабораторные `SsrfSafeMediaStore` и `McpClientRegistry` в срез не входят. Это записано в README, `docs/limitations.md`, `docs/claims.md` (C7), `docs/architecture.md` и `SECURITY.md`. Значок CI означает `npm ci` и `npm run typecheck`, не прогон тестов.
 
-`main` на коммите `ee5dc47` был красным: `npm ci` запускает `prepare`, сборка не находила `src/application/agents/state/mas-session-store.ts`. Этот срез включает этот модуль. Зелёным `main` становится после прогона Actions на этом коммите, не по тексту README.
+`main` на `8b2d8b3` зелёный (`ci` и CodeQL). До него `ee5dc47` был красным: `.gitignore` прятал `src/application/agents/state/mas-session-store.ts`, и `prepare` не собирал пакет.
 
 Дата проверки на этой машине: 2026-10-23. Удалённого репозитория ещё нет, поэтому установка `npm install github:<owner>/<repo>#<sha>` не выполнялась (MP-K5).
 

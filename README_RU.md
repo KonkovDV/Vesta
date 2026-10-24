@@ -129,10 +129,10 @@ void runKernel({ extensions: [cases] });
 | Загрузка документа | `selectIngestionHttpClient` |
 | Расчёт x402 | `pinnedExchange` |
 | GET к реестру образов | `pinnedExchange`, если у охранника есть `pinUrl` |
-| Исходящий MCP | `createPinnedFetch`, если у охранника есть `pinUrl` |
 | Обнаружение A2A, JSON-RPC и поток событий | тот же пин, его передаёт DI |
+| Исходящий MCP | Не закреплён. `McpToolConsumerAdapter` открывает транспорт SDK по URL. MP-K10. |
 
-Проверка, которая умеет только `isSafe` или `validateUrl`, сначала отвечает «можно», потом вызывает обычный `fetch`. Это не закрепление. Лабораторное хранилище медиа в этот срез не входит: граф импортов его не достигает. См. [docs/limitations.md](docs/limitations.md).
+Проверка, которая умеет только `isSafe` или `validateUrl`, сначала отвечает «можно», потом вызывает обычный `fetch`. Это не закрепление. Лабораторное хранилище медиа и лабораторный реестр MCP-клиентов в этот срез не входят. См. [docs/limitations.md](docs/limitations.md).
 
 ## Документы
 

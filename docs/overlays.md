@@ -14,7 +14,7 @@ The kernel agent loop is a short run, eight steps by default. A case that lives 
 | A wake-up at a later time | `ICronService` and `ICronJobRepository` are exported. This cut does not start a timer and does not contain `overdueSlotDecision`. A product that needs a wake-up brings its own clock. See MP-K9. |
 | The project's own tables | `microphoenix-migrate --dir`. Those files run after the kernel baseline. |
 | The project's own HTTP routes | `KernelExtension.routes`, after the kernel routes. |
-| An outbound HTTP call | `pinUrl` binds the socket to the addresses just checked. Ingestion, x402, the container registry, outbound MCP, and A2A use it when the guard is passed in. A new client does not inherit it. A check named `isSafe` or `validateUrl` without `pinUrl` is not that bind. |
+| An outbound HTTP call | `pinUrl` binds the socket to the addresses just checked. Ingestion, x402, the container registry, and A2A use it when the guard is passed in. Outbound MCP in this cut does not. MP-K10. A new client does not inherit the guard. A check named `isSafe` or `validateUrl` without `pinUrl` is not that bind. |
 
 Import these types from `microphoenix`. Deep paths under `microphoenix/dist` are closed.
 
