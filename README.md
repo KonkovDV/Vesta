@@ -14,13 +14,13 @@ Language: **EN** | [RU](README_RU.md)
 [![License: MIT](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![cite](https://img.shields.io/badge/cite-CITATION.cff-orange.svg)](CITATION.cff)
 
-PostgreSQL keeps the journal. The outbox carries the effect out. Redis is the bus. Express serves HTTP. The agent loop does not run a tool until a person grants that call. A project adds services, routes, and SQL without editing this tree.
+PostgreSQL keeps the journal. The outbox carries the effect out. Redis is the bus. Express serves HTTP. The agent loop does not run a tool with external effects until a person grants that call (`TOOL_APPROVAL_REQUIRED`, `POST /api/agents/runs/:id/approvals/:toolCallId`). A project adds services, routes, SQL, and tighter tool rules without editing this tree.
 
 If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/claims.md](docs/claims.md), those files win.
 
 | Field | Value |
 | --- | --- |
-| Version | 2.9.0 (`package.json`) |
+| Version | 2.10.0 (`package.json`) |
 | Runtime | Node.js 24 |
 | Maturity | Self-assessed TRL 4 in the sense of ISO 16290: a component exercised in the laboratory. Not a certificate and not a deployed service. |
 | Status words | `pinned` — a product names a 40-character commit. `ready` — `/health/ready` is 200 with the three real-store flags. Neither word means a model is accurate or a filing was sent. |
@@ -29,17 +29,17 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 ## What is claimed
 
-The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs `npm run typecheck` only. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
+The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs typecheck, `npm test` on Node 24 and 26, the build, the production audit, and an integration job with pgvector and Redis. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
 
 ## What is not claimed
 
-A web client, a collections product, a measured model score, exactly-once delivery to another organisation, or a statutory calculator. `USE_MOCK_AI=true` starts a stub model client. The literature map is [docs/research/long-running-case.md](docs/research/long-running-case.md).
+A web client, a collections product, a measured model score, exactly-once delivery to another organisation, or a statutory calculator. `USE_MOCK_AI=true` starts stub model clients (`IAIClient` and the agent loop's chat model). The literature map is [docs/research/long-running-case.md](docs/research/long-running-case.md).
 
 ## What it does
 
 - Starts one process: `src/index.ts` calls `runKernel()`.
 - Restores state from an append-only event journal.
-- Publishes through an outbox. Delivery to another system is at least once.
+- Publishes through an outbox. Redis Pub/Sub accepts the row at least once. A publish with no subscriber is lost. MP-K22.
 - Lets a project add services, HTTP routes, and SQL migrations without editing the kernel.
 - Refuses to replace a service the kernel already registered.
 - Stops a tool body in `ToolRegistry` when the call requires approval and does not carry `approvalGranted`.
@@ -47,7 +47,7 @@ A web client, a collections product, a measured model score, exactly-once delive
 
 ## What it does not do
 
-See [docs/limitations.md](docs/limitations.md). This package is not a web client, not a collections product, and not a claim that a model is accurate. `USE_MOCK_AI=true` starts a stub model client.
+See [docs/limitations.md](docs/limitations.md). This package is not a web client, not a collections product, and not a claim that a model is accurate. `USE_MOCK_AI=true` starts stub model clients for `IAIClient` and the agent loop.
 
 ## Install the server
 
@@ -109,7 +109,7 @@ const cases: KernelExtension = {
 void runKernel({ extensions: [cases] });
 ```
 
-`register` runs after the kernel's DI bootstrap. A second registration of a kernel token throws. `routes` run after the kernel routes and before the 404 handler. Project SQL runs after kernel SQL:
+`register` runs after the kernel's DI bootstrap and receives a guarded container: a second registration of any registered token throws, and `unregister`/`setAllowOverrides` are refused. `routes` run after the kernel routes and before the 404 handler. Project SQL runs after kernel SQL:
 
 ```bash
 npx microphoenix-migrate --dir ./migrations
@@ -124,11 +124,13 @@ The only supported import is `microphoenix`. `microphoenix/dist/...` is rejected
 | Command | Effect |
 | --- | --- |
 | `npm run typecheck` | Typecheck, no emit |
+| `npm test` | Unit tests (`tests/unit`, node:test + tsx) |
+| `npm run test:integration` | Integration tests; need `TEST_DATABASE_URL` (and `TEST_REDIS_URL`) |
 | `npm run build` | `dist/` plus `.d.ts`, copy SQL, rewrite `@/` aliases to relative paths |
 | `npm run migrate` | Apply kernel migrations. Extra directories: `npm run migrate -- --dir ./migrations` |
 | `npm start` | `node dist/index.js` |
 
-The kernel baseline is one file, `001_consolidated.sql`. The second run skips it when the checksum matches. A project directory passed with `--dir` still runs after it.
+The kernel ships `001_consolidated.sql`, `002_outbox_delivery.sql`, and `003_event_commit_order.sql`. The second run skips a file whose checksum matches. A project directory passed with `--dir` still runs after them.
 
 ## Outbound HTTP
 
@@ -140,7 +142,7 @@ When `ISsrfDnsGuard` is registered, these calls open the socket on the pinned ad
 | x402 settlement | `pinnedExchange` |
 | Container registry GET | `pinnedExchange` when the guard has `pinUrl` |
 | A2A discovery, JSON-RPC, and the event stream | the same pin, passed in from DI |
-| Outbound MCP | Not pinned. `McpToolConsumerAdapter` opens the SDK transport on the URL. MP-K10. |
+| Outbound MCP (SSE, streamable HTTP) | `createPinnedFetch` passed to the SDK transport |
 
 A validator that only answers `isSafe` or `validateUrl` still checks and then fetches. That is not a pin. The laboratory media store and the laboratory MCP client registry are not in this cut. See [docs/limitations.md](docs/limitations.md).
 

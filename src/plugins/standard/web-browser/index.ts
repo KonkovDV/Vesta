@@ -4,6 +4,7 @@ import { IAgentTool } from '../../../domain/agents/tools.interface';
 import { manifest } from './manifest';
 import type { ILogger } from '../../../core/decorators/ILogger';
 import { z } from 'zod';
+import { SsrfDnsGuard } from '../../../infrastructure/security/SsrfDnsGuard';
 
 type Browser = import('puppeteer').Browser;
 type Page = import('puppeteer').Page;
@@ -12,6 +13,9 @@ export default class WebBrowserPlugin implements IMicroPhoenixPlugin {
   readonly manifest: PluginManifest = manifest;
   private browser: Browser | null = null;
     private logger: ILogger | null = null;
+  /** Checks the navigation target and every request the page makes. */
+  private readonly guard = new SsrfDnsGuard();
+  private readonly guardedPages = new WeakSet<Page>();
 
   async onLoad(context: IPluginContext): Promise<void> {
     this.logger = context.logger;
@@ -43,6 +47,8 @@ export default class WebBrowserPlugin implements IMicroPhoenixPlugin {
         }),
         execute: async (args, agentContext) => {
             const typedArgs = args as { url: string; waitForSelector?: string };
+            // z.string().url() accepts file:, chrome: and javascript: URLs.
+            await assertBrowsableUrl(this.guard, typedArgs.url);
             const page = await this.getPage();
             this.logger!.debug(`Navigating to ${typedArgs.url}`);
             await page.goto(typedArgs.url, { waitUntil: 'networkidle0' });
@@ -90,13 +96,46 @@ export default class WebBrowserPlugin implements IMicroPhoenixPlugin {
       if (!this.browser) {
           this.logger!.info("Launching Puppeteer...");
           const { default: puppeteer } = await import('puppeteer');
+          // The page content is untrusted. Chrome's own sandbox stays on unless the
+          // operator turns it off for an image that cannot provide it.
+          const noSandbox = process.env.PUPPETEER_NO_SANDBOX === 'true';
           this.browser = await puppeteer.launch({
               headless: true,
-              args: ['--no-sandbox', '--disable-setuid-sandbox'] // For container safety
+              args: noSandbox ? ['--no-sandbox', '--disable-setuid-sandbox'] : [],
           });
       }
       const pages = await this.browser.pages();
-      if (pages.length > 0) return pages[0];
-      return await this.browser.newPage();
+      const page = pages.length > 0 ? pages[0] : await this.browser.newPage();
+      await this.guardPage(page);
+      return page;
   }
+
+  /**
+   * Every subresource, redirect and script-initiated request is checked too. The
+   * browser resolves names itself, so a rebinding DNS answer can still differ from
+   * this check: run the browser behind an egress proxy for a hard boundary.
+   */
+  private async guardPage(page: Page): Promise<void> {
+      if (this.guardedPages.has(page)) return;
+      this.guardedPages.add(page);
+      await page.setRequestInterception(true);
+      page.on('request', (request) => {
+          const url = request.url();
+          if (url.startsWith('data:') || url === 'about:blank') {
+              void request.continue();
+              return;
+          }
+          assertBrowsableUrl(this.guard, url)
+              .then(() => request.continue())
+              .catch(() => request.abort('blockedbyclient'));
+      });
+  }
+}
+
+export async function assertBrowsableUrl(guard: Pick<SsrfDnsGuard, 'validateUrl'>, url: string): Promise<void> {
+  const parsed = new URL(url);
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`web-browser: scheme ${parsed.protocol} is not allowed`);
+  }
+  await guard.validateUrl(url);
 }

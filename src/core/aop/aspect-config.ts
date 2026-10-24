@@ -78,7 +78,8 @@ const aspectConfiguration: AspectConfiguration = {
           'ChatService',
           'ConversationService',
           'FileProcessingService',
-          'AuthService',
+          // AuthService is not here: a rejected key is rejected again, and three
+          // attempts turned every 401 into a 300 ms response.
           'RateLimitService',
           'FeatureFlagsService',
           'HealthCheckService',

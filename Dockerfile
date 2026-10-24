@@ -20,7 +20,7 @@ RUN mkdir -p logs temp uploads
 
 FROM gcr.io/distroless/nodejs24-debian12@sha256:61f4f4341db81820c24ce771b83d202eb6452076f58628cd536cc7d94a10978b AS production
 WORKDIR /app
-ARG APP_VERSION=2.9.0
+ARG APP_VERSION=2.10.0
 LABEL org.opencontainers.image.title="MicroPhoenix" \
       org.opencontainers.image.version="${APP_VERSION}" \
       org.opencontainers.image.description="Event sourcing and clean architecture kernel" \

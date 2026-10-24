@@ -8,10 +8,10 @@
  * - MCP Streamable HTTP spec (March 2025+): session management, resumability
  * - Transport auto-detection: POST first → fallback to legacy SSE
  * - Connection lifecycle: singleton stdio, per-request HTTP
- * - All outbound URLs validated (future: ISsrfDnsGuard integration)
+ * - SSE and streamable HTTP use createPinnedFetch when a DNS guard is passed in
  * - Tool calls auditable via structured logging with correlationId
  *
- * DI: constructor(logger: ILogger, configLoader: ConfigLoader) — 2 args
+ * DI: constructor(logger, configLoader, toolPolicy?, guard?)
  *
  * @see Book Ch.10 "MCP" — MCP Client, Stdio/SSE Connection
  * @see https://modelcontextprotocol.io/specification
@@ -37,6 +37,8 @@ import type {
 } from '../../domain/mcp/mcp-tool-consumer.interface';
 import type { IToolExecutionPolicy, ToolExecutionRequest } from '../../domain/security/tool-execution-policy.interface';
 import { McpConnectionError } from '../../domain/errors/agentic-errors';
+import { createPinnedFetch } from '../http/SsrfPinnedHttpClient';
+import type { PinnedEndpoint } from '../security/SsrfDnsGuard';
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -49,6 +51,8 @@ export class McpToolConsumerAdapter implements IMcpToolConsumer {
     private readonly logger: ILogger,
     private readonly configLoader: ConfigLoader,
     private readonly toolPolicy?: IToolExecutionPolicy,
+    /** When present, SSE and streamable HTTP connect to the addresses pinUrl checked. MP-K10. */
+    private readonly guard?: { pinUrl(url: string): Promise<PinnedEndpoint> },
   ) {}
 
   async connect(
@@ -291,18 +295,23 @@ export class McpToolConsumerAdapter implements IMcpToolConsumer {
         if (!params.url) {
           throw new Error('sse transport requires "url" parameter');
         }
-        return new SSEClientTransport(new URL(params.url));
+        return new SSEClientTransport(new URL(params.url), this.pinnedTransportOptions());
       }
       case 'streamable-http': {
         if (!params.url) {
           throw new Error('streamable-http transport requires "url" parameter');
         }
-        return new StreamableHTTPClientTransport(new URL(params.url));
+        return new StreamableHTTPClientTransport(new URL(params.url), this.pinnedTransportOptions());
       }
       default: {
         throw new Error('Unsupported MCP transport');
       }
     }
+  }
+
+  /** The SDK transports accept a fetch; the pinned one never re-resolves the host. */
+  private pinnedTransportOptions(): { fetch: ReturnType<typeof createPinnedFetch> } | undefined {
+    return this.guard ? { fetch: createPinnedFetch(this.guard) } : undefined;
   }
 
   private ensureConnected(correlationId: CorrelationId): void {

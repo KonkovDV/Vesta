@@ -11,6 +11,7 @@ export const AgentRunEventTypeSchema = z.enum([
   'AgentRunStarted',
   'ModelCalled',
   'ToolCallRequested',
+  'ToolCallStarted',
   'ToolCallCompleted',
   'AgentContextCompacted',
   'AgentRunFinished',
@@ -28,6 +29,9 @@ export const AgentRunStartedSchema = z.object({
   codeVersion: z.string().min(1).optional(),
   modelId: z.string().min(1).optional(),
   toolsetHash: z.string().min(1).optional(),
+  /** Principal that started the run. Readers and cancel check it. */
+  ownerId: z.string().min(1).optional(),
+  tenantId: z.string().min(1).optional(),
 });
 
 export const ModelCalledSchema = z.object({
@@ -41,6 +45,17 @@ export const ModelCalledSchema = z.object({
 });
 
 export const ToolCallRequestedSchema = z.object({
+  ...agentRunBase,
+  toolCallId: z.string().min(1),
+  name: z.string().min(1),
+});
+
+/**
+ * Written right before the tool body runs, with the stream version the writer
+ * read. A second writer that read the same version fails, so one call has one
+ * executor. A Started without a Completed after restart means the outcome is unknown.
+ */
+export const ToolCallStartedSchema = z.object({
   ...agentRunBase,
   toolCallId: z.string().min(1),
   name: z.string().min(1),
@@ -65,6 +80,8 @@ export const ToolApprovalDecidedSchema = z.object({
   toolCallId: z.string().min(1),
   decision: z.enum(['approved', 'denied', 'expired']),
   argumentsHash: z.string().min(1).optional(),
+  /** Who decided. Absent for an expiry written by the kernel. */
+  decidedBy: z.string().min(1).optional(),
 });
 
 export const AgentRunCancelledSchema = z.object({
@@ -88,6 +105,7 @@ export const AgentRunPayloadSchema = z.union([
   AgentRunStartedSchema,
   ModelCalledSchema,
   ToolCallRequestedSchema,
+  ToolCallStartedSchema,
   ToolCallCompletedSchema,
   ToolApprovalRequestedSchema,
   ToolApprovalDecidedSchema,

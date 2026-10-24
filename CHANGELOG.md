@@ -1,5 +1,32 @@
 # Changelog
 
+## 2.10.0
+
+Hardening cut. Each line names the check that backs it; `npm test` and `npm run test:integration` are part of this repository now.
+
+- A kernel extension receives a guarded container view. `register` refuses any token that is already registered, whatever the global override flag says; `unregister`, `setAllowOverrides`, `clear`, `dispose` and `setAspectManager` throw. Before this cut the global container allowed overrides, so an extension could replace `IToolExecutionPolicy`. `tests/unit/kernel-extensions.test.ts`.
+- `ToolRegistry.execute` validates and sanitizes the arguments first and asks the policy about those, so the policy and the body see the same object. A second tool under one name is refused; MCP discovery cannot replace a local tool. `tests/unit/tool-registry.test.ts`.
+- `AgentRunService` appends `ToolCallStarted` with the stream version it read before a tool body runs. Two executors cannot both run one call; a call that was running when the process stopped is journaled as `outcome_unknown` and not repeated; calls queued behind an approval run after the decision, so the model never receives a tool call without a result. A policy that rewrites approved arguments is denied. `ToolApprovalDecided` records `decidedBy`. Model failures back off with jitter. `tests/unit/agent-run-service.test.ts`, `tests/integration/agent-run-postgres.test.ts`.
+- `wrapUntrusted` escapes `<untrusted` / `</untrusted` inside tool output.
+- Agent run routes record the owner on `AgentRunStarted`; `GET .../events` and `POST .../cancel` answer 404 for another principal and for an unknown run. `tests/unit/agent-run-routes.test.ts`.
+- `RetryAspect` repeats only transient failures of read-only methods. Before, every `*Adapter` method (payments, tool bodies, messages) ran up to three times after any error, and every 401 took 300 ms. `tests/unit/retry-aspect.test.ts`.
+- SSRF: IPv6 is parsed, IPv4-mapped and NAT64 addresses are checked as the IPv4 host they reach, and the remaining IANA special-purpose ranges are blocked. `pinnedExchange` caps the body; the pinned fetch drops credentials on a cross-origin redirect. `tests/unit/ssrf.test.ts`.
+- Outbox (`002_outbox_delivery.sql`): backoff before a retry, an expired lease counts as an attempt (poison rows reach the DLQ), PUBLISHED/FAILED updates are fenced by the claim's lease token, and only the oldest open version of an aggregate is claimed. `tests/integration/outbox-delivery.test.ts`.
+- `EVENT_BUS_REQUIRE_SUBSCRIBER=true` fails a Redis PUBLISH that reached no subscriber, so the outbox retries it.
+- Standard plugins load (the loader had the wrong registry) but only when `STANDARD_PLUGINS` names them. `code_execute` no longer runs code in `node:vm`; `file-system` checks real paths; `web-browser` accepts only public http(s) and keeps Chrome's sandbox. `tests/unit/standard-plugins.test.ts`.
+- `read_file` compares real paths and caps the size. `tests/unit/workspace-read-file.test.ts`.
+- HTTP: the client id is `req.ip`, metric labels are route templates, logs drop the query string, `api_key` in the query needs `ALLOW_QUERY_API_KEY=true`. `tests/unit/http-identity.test.ts`.
+- `readInt`/`readBool` accept values the schema coerced: `REDIS_PORT` and `REDIS_DB` were ignored, and the kernel did not start on a non-default Redis port. `getConfig()` is cached until `reloadConfig()`. `tests/unit/app-config.test.ts`.
+- `microphoenix-migrate` stops after the first failed file (`--continue-on-error` keeps the old behaviour) and sets `lock_timeout`. `tests/unit/migration-runner.test.ts`.
+- `AnthropicChatModel` keeps the cached prefix stable and sets `cache_control` breakpoints. `tests/unit/anthropic-chat-model.test.ts`.
+- `LoggingAspect` traces calls at debug level; a 4xx is a warning.
+- Dependencies: `npm audit --omit=dev` reports 0. multer 2, uuid 11; `module-alias` removed; `@types/*` are devDependencies.
+- CI runs typecheck, unit tests on Node 24 and 26, build, the production audit, and an integration job with pgvector and Redis.
+- Human approval works end to end: the policy asks for tools with external effects (`TOOL_APPROVAL_REQUIRED`), `POST /api/agents/runs/:id/approvals/:toolCallId` records the decision and resumes, `KernelExtension.toolPolicy` adds tighten-only rules. `bash`/`python` are no longer denied by the `exec` alias. MP-K27..MP-K29.
+- Outbound MCP over HTTP is pinned (MP-K10). The MCP HTTP server no longer takes the policy agent id from the URL (MP-K30).
+- `getCommittedEventsAfter` and migration `003_event_commit_order.sql` read the journal in commit order (MP-K23).
+- `USE_MOCK_AI=true` stubs the agent loop's chat model (MP-K33). Outbox TLS verifies certificates by default (MP-K34).
+
 ## 2.9.0
 
 First cut published as a library kernel.
@@ -14,4 +41,4 @@ First cut published as a library kernel.
 - A failed `runKernel()` removes the process handlers installed for that attempt.
 - The published tree does not include `CronScheduleComputer` or a running cron timer. `ICronService` is a port only. MP-K9.
 - `ToolRegistry.execute` does not run a tool when `requiresApproval` is set unless the call has `approvalGranted`. A batch records that call as `ask` and skips the body.
-- When the DNS guard can pin an address, document ingestion, x402 settlement, container-registry GET, and A2A connect to those addresses. A redirect is pinned again. A check that only returns `isSafe` does not pin the socket. The laboratory media store is not in this cut. Outbound MCP in this cut does not pin. MP-K10.
+- When the DNS guard can pin an address, document ingestion, x402 settlement, container-registry GET, and A2A connect to those addresses. A redirect is pinned again. A check that only returns `isSafe` does not pin the socket. The laboratory media store is not in that cut. Outbound MCP in 2.9.0 does not pin; 2.10.0 does. MP-K10.

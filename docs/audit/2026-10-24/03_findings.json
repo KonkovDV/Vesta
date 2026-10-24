@@ -1,0 +1,942 @@
+[
+  {
+    "id": "V-01",
+    "severity": "Critical",
+    "layer": "core/kernel",
+    "category": "security",
+    "title": "Расширение может молча заменить любой токен ядра, включая IToolExecutionPolicy: глобальный контейнер создан с setAllowOverrides(true); unregister доступен",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/di-override.cjs → policy=extension",
+    "files": [
+      "src/core/di/container.ts:704",
+      "src/kernel.ts"
+    ],
+    "fix_commit": "kernel: guard extension container",
+    "test": "tests/unit/kernel-extensions.test.ts",
+    "known_issue": "MP-K11",
+    "owasp": "ASI04 (supply chain), ASI03",
+    "plan_task": null,
+    "red_team": "RT-1"
+  },
+  {
+    "id": "V-02",
+    "severity": "Critical",
+    "layer": "application/security",
+    "category": "security",
+    "title": "Human-in-the-loop не срабатывает никогда: поставляемая ToolPolicyService не возвращает requiresApproval ни для одного инструмента; маршрута записи решения нет",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/policy.cjs — requiresApproval=false для всех 11 комбинаций; grep decideApproval — 0 вызовов",
+    "files": [
+      "src/application/security/ToolPolicyService.ts",
+      "src/application/agents/register-agent-run-routes.ts"
+    ],
+    "fix_commit": "Human-in-the-loop end to end",
+    "test": "tests/unit/tool-policy-service.test.ts, tests/unit/agent-run-routes.test.ts",
+    "known_issue": "MP-K27, MP-K28",
+    "owasp": "ASI02 Tool Misuse, ASI09 Human-Agent Trust",
+    "plan_task": null,
+    "red_team": "RT-2"
+  },
+  {
+    "id": "V-03",
+    "severity": "Critical",
+    "layer": "core/aop",
+    "category": "correctness",
+    "title": "RetryAspect повторяет любой метод любого *Adapter/*Repository 3 раза при любой ошибке: платежи x402, исполнение инструментов, MCP-вызовы выполняются повторно; каждый 401 — 300 мс",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/retry-dup.cjs → 3 побочных эффекта на 1 вызов; curl 401 = 0,33 с",
+    "files": [
+      "src/core/aop/RetryAspect.ts",
+      "src/core/aop/aspect-config.ts"
+    ],
+    "fix_commit": "RetryAspect: repeat only transient failures of read-only methods",
+    "test": "tests/unit/retry-aspect.test.ts",
+    "known_issue": "MP-K13",
+    "owasp": "ASI08 Cascading Failures",
+    "plan_task": "T2.2",
+    "red_team": "RT-4"
+  },
+  {
+    "id": "V-04",
+    "severity": "Critical",
+    "layer": "application/agents",
+    "category": "correctness",
+    "title": "Одобренный инструмент выполняется дважды при параллельном resume(): нет оптимистичной блокировки потока",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/agent-run.cjs → pay executed 2 time(s)",
+    "files": [
+      "src/application/agents/AgentRunService.ts"
+    ],
+    "fix_commit": "AgentRunService: one executor per tool call",
+    "test": "tests/unit/agent-run-service.test.ts, tests/integration/agent-run-postgres.test.ts",
+    "known_issue": "MP-K12",
+    "owasp": "ASI02",
+    "plan_task": null,
+    "red_team": "RT-10"
+  },
+  {
+    "id": "V-05",
+    "severity": "Critical",
+    "layer": "plugins",
+    "category": "security",
+    "title": "code_execute исполняет код в node:vm: console.log.constructor(\"return process\")() возвращает хостовый process (uid 0) → RCE. Латентно: спасал только баг V-12",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/vm-escape.cjs → escaped: pid, uid=0",
+    "files": [
+      "src/plugins/standard/code-interpreter/index.ts"
+    ],
+    "fix_commit": "Plugins: ... close vm RCE",
+    "test": "tests/unit/standard-plugins.test.ts",
+    "known_issue": "MP-K17",
+    "owasp": "ASI05 Unexpected Code Execution",
+    "plan_task": null,
+    "red_team": "RT-6"
+  },
+  {
+    "id": "V-06",
+    "severity": "Critical",
+    "layer": "infrastructure/events",
+    "category": "reliability",
+    "title": "Шина — Redis Pub/Sub: outbox помечает строку PUBLISHED, когда Redis принял сообщение, даже без подписчиков; at-least-once (C5) обрывается на Redis",
+    "status": "partly fixed",
+    "evidence": "runtime probe: вставка в outbox → PUBLISHED при PUBSUB CHANNELS = пусто",
+    "files": [
+      "src/infrastructure/events/redis-event-bus.ts",
+      "src/infrastructure/events/postgres-outbox.ts"
+    ],
+    "fix_commit": "strict bus mode (EVENT_BUS_REQUIRE_SUBSCRIBER)",
+    "test": "tests/integration/redis-bus-strict.test.ts",
+    "known_issue": "MP-K22",
+    "owasp": null,
+    "plan_task": "T1.1",
+    "red_team": "RT-8"
+  },
+  {
+    "id": "V-07",
+    "severity": "High",
+    "layer": "application/agents",
+    "category": "correctness",
+    "title": "После сбоя посреди инструмента или удержания одобрения посреди нескольких tool-call модель получает tool_use без tool_result → провайдер отвечает 400, прогон умирает",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/agent-run.cjs — транскрипты assistant[a,b,c] tool<a> tool<b>; assistant[k]",
+    "files": [
+      "src/application/agents/AgentRunService.ts"
+    ],
+    "fix_commit": "settle open calls on resume",
+    "test": "tests/unit/agent-run-service.test.ts",
+    "known_issue": "MP-K12",
+    "owasp": null,
+    "plan_task": null,
+    "red_team": "RT-10"
+  },
+  {
+    "id": "V-08",
+    "severity": "High",
+    "layer": "application/agents",
+    "category": "security",
+    "title": "BOLA: любой ключ с agents.run читает поток событий любого прогона; любой ключ отменяет любой run id (и создаёт поток для несуществующего)",
+    "status": "fixed",
+    "evidence": "code reading + test",
+    "files": [
+      "src/application/agents/register-agent-run-routes.ts",
+      "src/application/controllers/AgentRunCancelController.ts"
+    ],
+    "fix_commit": "Agent run routes: owner check",
+    "test": "tests/unit/agent-run-routes.test.ts",
+    "known_issue": "MP-K19",
+    "owasp": "API1:2023 BOLA",
+    "plan_task": null,
+    "red_team": "RT-3"
+  },
+  {
+    "id": "V-09",
+    "severity": "High",
+    "layer": "application/agents",
+    "category": "security",
+    "title": "Политика оценивает сырые аргументы, а инструмент получает аргументы после схемы и санитизации (TOCTOU); человек одобряет сырые аргументы без значений по умолчанию",
+    "status": "fixed",
+    "evidence": "test: default recipient виден только после схемы",
+    "files": [
+      "src/application/agents/services/ToolRegistry.ts",
+      "src/application/agents/AgentRunService.ts"
+    ],
+    "fix_commit": "ToolRegistry: evaluate the policy on the arguments the body receives; Murder-board fixes",
+    "test": "tests/unit/tool-registry.test.ts, tests/unit/agent-run-service.test.ts",
+    "known_issue": null,
+    "owasp": "ASI02",
+    "plan_task": null,
+    "red_team": "RT-2"
+  },
+  {
+    "id": "V-10",
+    "severity": "High",
+    "layer": "application/agents",
+    "category": "security",
+    "title": "Вывод инструмента может закрыть ограду </untrusted> и писать «вне данных» (spotlighting обходится одной строкой)",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/agent-run.cjs п.4",
+    "files": [
+      "src/application/agents/AgentRunService.ts"
+    ],
+    "fix_commit": "wrapUntrusted escapes",
+    "test": "tests/unit/agent-run-service.test.ts",
+    "known_issue": null,
+    "owasp": "ASI01 Agent Goal Hijack",
+    "plan_task": "T3.2",
+    "red_team": "RT-2"
+  },
+  {
+    "id": "V-11",
+    "severity": "High",
+    "layer": "infrastructure/security",
+    "category": "security",
+    "title": "SSRF-guard при blockIpv6:false пропускает [::ffff:127.0.0.1], NAT64, 6to4, IPv4-compatible, site-local, 198.18/15, 192.0.0/24; pinnedExchange читает тело без лимита; pinned fetch пересылает Authorization при межорigin-редиректе",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/ssrf.cjs (8 ALLOWED). Достижимость сокета через IPv6 не проверена: в песочнице нет IPv6",
+    "files": [
+      "src/infrastructure/security/SsrfDnsGuard.ts",
+      "src/infrastructure/http/SsrfPinnedHttpClient.ts"
+    ],
+    "fix_commit": "SSRF: classify IPs by parsed value",
+    "test": "tests/unit/ssrf.test.ts",
+    "known_issue": "MP-K14",
+    "owasp": "API7:2023 SSRF",
+    "plan_task": null,
+    "red_team": "RT-5"
+  },
+  {
+    "id": "V-12",
+    "severity": "High",
+    "layer": "infrastructure/plugins",
+    "category": "correctness",
+    "title": "Ни один стандартный плагин не загружается (в DI под IPluginRegistry другой класс без getPlugin), хотя MP-K2 отмечен «closed»",
+    "status": "fixed",
+    "evidence": "runtime probe: лог ядра «this.registry.getPlugin is not a function» ×3",
+    "files": [
+      "src/infrastructure/di/bootstrap.ts:176"
+    ],
+    "fix_commit": "Plugins: load the runtime registry; opt-in loading",
+    "test": "tests/unit/standard-plugins.test.ts + живая загрузка",
+    "known_issue": "MP-K16",
+    "owasp": null,
+    "plan_task": "T2.1",
+    "red_team": null
+  },
+  {
+    "id": "V-13",
+    "severity": "High",
+    "layer": "plugins",
+    "category": "security",
+    "title": "file-system: префиксная проверка (sandbox/fs-other) и симлинки; web-browser: file://, приватные адреса, Chrome с --no-sandbox",
+    "status": "fixed",
+    "evidence": "test",
+    "files": [
+      "src/plugins/standard/file-system/index.ts",
+      "src/plugins/standard/web-browser/index.ts"
+    ],
+    "fix_commit": "Plugins: ... path and browser escapes",
+    "test": "tests/unit/standard-plugins.test.ts",
+    "known_issue": "MP-K18",
+    "owasp": "ASI05",
+    "plan_task": null,
+    "red_team": "RT-7"
+  },
+  {
+    "id": "V-14",
+    "severity": "High",
+    "layer": "application/agents/tools",
+    "category": "security",
+    "title": "read_file выходит из workspace через симлинк на каталог (прочитан /etc/hostname); читает файл целиком без лимита",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/readfile.cjs → content \"vm\"",
+    "files": [
+      "src/application/agents/tools/workspace-read-file.tool.ts"
+    ],
+    "fix_commit": "read_file: compare real paths; cap file size",
+    "test": "tests/unit/workspace-read-file.test.ts",
+    "known_issue": "MP-K18",
+    "owasp": null,
+    "plan_task": null,
+    "red_team": "RT-7"
+  },
+  {
+    "id": "V-15",
+    "severity": "High",
+    "layer": "infrastructure/events",
+    "category": "reliability",
+    "title": "Outbox: повтор без backoff, «ядовитое» сообщение по истёкшей аренде крутится вечно, отметка без fencing-токена, v2 агрегата может уйти раньше v1",
+    "status": "fixed",
+    "evidence": "test (PostgreSQL 16)",
+    "files": [
+      "src/infrastructure/events/postgres-outbox.ts",
+      "migrations/002_outbox_delivery.sql"
+    ],
+    "fix_commit": "Outbox: backoff, lease fencing, poison accounting, per-aggregate order",
+    "test": "tests/integration/outbox-delivery.test.ts",
+    "known_issue": "MP-K21",
+    "owasp": null,
+    "plan_task": null,
+    "red_team": "RT-10"
+  },
+  {
+    "id": "V-16",
+    "severity": "High",
+    "layer": "core/config",
+    "category": "correctness",
+    "title": "REDIS_PORT/REDIS_DB игнорируются (z.coerce.number() против readInt, принимающего только строки): ядро не стартует на нестандартном порту Redis",
+    "status": "fixed",
+    "evidence": "runtime probe: «Cache is not available», ECONNREFUSED 127.0.0.1:6379 при REDIS_PORT=56379",
+    "files": [
+      "src/core/config/app-config.ts"
+    ],
+    "fix_commit": "fix coerced config readers",
+    "test": "tests/unit/app-config.test.ts",
+    "known_issue": "MP-K15",
+    "owasp": null,
+    "plan_task": null,
+    "red_team": null
+  },
+  {
+    "id": "V-17",
+    "severity": "High",
+    "layer": "infrastructure/events",
+    "category": "correctness",
+    "title": "Читатель по GSN пропускает событие, чья транзакция взяла меньший gsn и закоммитилась позже",
+    "status": "partly fixed",
+    "evidence": "runtime probe: probes/gsn-skip.cjs → SKIPPED gsn=6",
+    "files": [
+      "src/infrastructure/events/postgres-event-store.ts",
+      "src/application/workers/SemanticEmbeddingWorker.ts"
+    ],
+    "fix_commit": "Event store: commit-order reader",
+    "test": "tests/integration/event-commit-order.test.ts",
+    "known_issue": "MP-K23",
+    "owasp": null,
+    "plan_task": "T1.2",
+    "red_team": "RT-10"
+  },
+  {
+    "id": "V-18",
+    "severity": "High",
+    "layer": "application/security",
+    "category": "correctness",
+    "title": "bash и python всегда запрещены: алиас exec совпадает с записью глобального deny-листа",
+    "status": "fixed",
+    "evidence": "runtime probe: probes/policy.cjs → allowed=false",
+    "files": [
+      "src/application/security/ToolPolicyService.ts"
+    ],
+    "fix_commit": "Human-in-the-loop end to end",
+    "test": "tests/unit/tool-policy-service.test.ts",
+    "known_issue": "MP-K29",
+    "owasp": null,
+    "plan_task": null,
+    "red_team": null
+  },
+  {
+    "id": "V-19",
+    "severity": "High",
+    "layer": "presentation/http",
+    "category": "security",
+    "title": "BFLA: маршруты sales/hr/healthcare (включая MRI second opinion) проверяют только аутентификацию, без scope",
+    "status": "open",
+    "evidence": "runtime probe: ключ со scope agents.run дошёл до валидации обработчика healthcare",
+    "files": [
+      "src/presentation/http/register-default-routes.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": "MP-K32",
+    "owasp": "API5:2023 BFLA",
+    "plan_task": "T1.4",
+    "red_team": "RT-3"
+  },
+  {
+    "id": "V-20",
+    "severity": "High",
+    "layer": "infrastructure/http",
+    "category": "security",
+    "title": "MCP HTTP-сервер берёт agentId политики из URL (:clientName): researcher-* → профиль full. Латентно: маршруты отвечают 404 (смонтированы после 404-обработчика)",
+    "status": "partly fixed",
+    "evidence": "runtime probe: /api/mcp/* → 404 при логе mcp_http_routes_mounted",
+    "files": [
+      "src/infrastructure/http/AppServer.ts"
+    ],
+    "fix_commit": "MCP agent id fixed",
+    "test": null,
+    "known_issue": "MP-K30, MP-K31",
+    "owasp": "ASI03 Identity & Privilege Abuse",
+    "plan_task": "T1.5",
+    "red_team": "RT-3"
+  },
+  {
+    "id": "V-21",
+    "severity": "High",
+    "layer": "infrastructure/mcp",
+    "category": "security",
+    "title": "Исходящий MCP (SSE/streamable HTTP) не закреплён на проверенных адресах",
+    "status": "fixed",
+    "evidence": "test",
+    "files": [
+      "src/infrastructure/mcp/McpToolConsumerAdapter.ts"
+    ],
+    "fix_commit": "MCP: outbound ... pinned fetch",
+    "test": "tests/unit/mcp-consumer-pin.test.ts",
+    "known_issue": "MP-K10",
+    "owasp": "API7:2023",
+    "plan_task": null,
+    "red_team": "RT-5"
+  },
+  {
+    "id": "V-22",
+    "severity": "Medium",
+    "layer": "application/http",
+    "category": "ops",
+    "title": "Метки метрик — сырой путь: одна серия на каждый run id (+60 серий за 60 запросов); /metrics без аутентификации вне production",
+    "status": "fixed",
+    "evidence": "runtime probe: до +60, после +1",
+    "files": [
+      "src/application/app.ts"
+    ],
+    "fix_commit": "route-template metric labels",
+    "test": "tests/unit/http-identity.test.ts",
+    "known_issue": "MP-K20",
+    "owasp": "API4:2023",
+    "plan_task": null,
+    "red_team": "RT-4"
+  },
+  {
+    "id": "V-23",
+    "severity": "Medium",
+    "layer": "application/services",
+    "category": "security",
+    "title": "API-ключ в query-строке принимается вне production и пишется в лог открытым текстом",
+    "status": "fixed",
+    "evidence": "runtime probe: ключ найден в логе",
+    "files": [
+      "src/application/services/AuthService.ts",
+      "src/application/app.ts"
+    ],
+    "fix_commit": "no keys in logs",
+    "test": "tests/unit/http-identity.test.ts",
+    "known_issue": "MP-K20",
+    "owasp": "API2:2023",
+    "plan_task": null,
+    "red_team": "RT-4"
+  },
+  {
+    "id": "V-24",
+    "severity": "Medium",
+    "layer": "application/http",
+    "category": "security",
+    "title": "Ключ лимитера — первый хоп X-Forwarded-For (подделывается клиентом); «штрафная коробка» банит по req.ip на 10 мин — за прокси без TRUST_PROXY банит всех",
+    "status": "partly fixed",
+    "evidence": "code reading + test",
+    "files": [
+      "src/application/app.ts",
+      "src/application/middleware/rate-limiter.middleware.ts"
+    ],
+    "fix_commit": "client id from req.ip",
+    "test": "tests/unit/http-identity.test.ts",
+    "known_issue": "MP-K26",
+    "owasp": "API4:2023",
+    "plan_task": "T2.5",
+    "red_team": "RT-4"
+  },
+  {
+    "id": "V-25",
+    "severity": "Medium",
+    "layer": "core/aop",
+    "category": "ops",
+    "title": "Усиление логов: ~4,2 КБ и запись «урока об ошибке» в БД на каждый неаутентифицированный запрос",
+    "status": "partly fixed",
+    "evidence": "runtime probe: 4219 → 2237 байт/запрос",
+    "files": [
+      "src/core/aop/LoggingAspect.ts",
+      "src/infrastructure/logging/StructuredLogger.ts"
+    ],
+    "fix_commit": "LoggingAspect: debug level ...",
+    "test": "tests/unit/logging-aspect.test.ts",
+    "known_issue": "MP-K25",
+    "owasp": "API4:2023",
+    "plan_task": "T2.4",
+    "red_team": "RT-4"
+  },
+  {
+    "id": "V-26",
+    "severity": "Medium",
+    "layer": "config",
+    "category": "performance",
+    "title": "getConfig() без кэша: полный Zod-разбор process.env ≈209 мкс на вызов, вызывается с горячих путей",
+    "status": "fixed",
+    "evidence": "runtime probe: 209 мкс → 0,3 мкс",
+    "files": [
+      "src/config/index.ts"
+    ],
+    "fix_commit": "cache config",
+    "test": "tests/unit/app-config.test.ts",
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": null,
+    "red_team": null
+  },
+  {
+    "id": "V-27",
+    "severity": "Medium",
+    "layer": "infrastructure/database",
+    "category": "reliability",
+    "title": "Раннер миграций продолжает после ошибки, нет lock_timeout, «empty» вместо «skipped»; разбиение CONCURRENTLY-файлов по «;», журнал по basename, lock id 1337",
+    "status": "partly fixed",
+    "evidence": "test",
+    "files": [
+      "src/infrastructure/database/migration-runner.ts"
+    ],
+    "fix_commit": "Migrations stop at the first failure",
+    "test": "tests/unit/migration-runner.test.ts",
+    "known_issue": "MP-K6",
+    "owasp": null,
+    "plan_task": "T2.7",
+    "red_team": null
+  },
+  {
+    "id": "V-28",
+    "severity": "Medium",
+    "layer": "infrastructure",
+    "category": "reliability",
+    "title": "DDL во время старта из нескольких компонентов: гонка (duplicate key pg_type_typname_nsp_index), 7 таблиц вне миграций, нужны DDL-права у приложения",
+    "status": "open",
+    "evidence": "runtime probe: лог старта",
+    "files": [
+      "src/infrastructure/memory/stores/PostgresTipStore.ts",
+      "postgres-event-store.ts initialize()"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": "MP-K24",
+    "owasp": null,
+    "plan_task": "T1.3",
+    "red_team": null
+  },
+  {
+    "id": "V-29",
+    "severity": "Medium",
+    "layer": "infrastructure/di",
+    "category": "correctness",
+    "title": "USE_MOCK_AI=true не заглушает модель агентного цикла: при ANTHROPIC_BASE_URL идут реальные вызовы",
+    "status": "fixed",
+    "evidence": "runtime probe: agent_model_error ×3 в mock-режиме",
+    "files": [
+      "src/infrastructure/di/modules/ai.module.ts"
+    ],
+    "fix_commit": "Human-in-the-loop end to end (mock chat model)",
+    "test": "живой прогон → completed",
+    "known_issue": "MP-K33",
+    "owasp": null,
+    "plan_task": null,
+    "red_team": null
+  },
+  {
+    "id": "V-30",
+    "severity": "Medium",
+    "layer": "infrastructure/di",
+    "category": "correctness",
+    "title": "27 из 366 токенов не разрешаются в mock-режиме, 24 — «No LLM providers configured» (включая IOutputGuardrailPipeline)",
+    "status": "open",
+    "evidence": "runtime probe: evidence/resolve-all-*.txt",
+    "files": [
+      "src/infrastructure/di/modules/*.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": "MP-K35",
+    "owasp": null,
+    "plan_task": "T2.3",
+    "red_team": null
+  },
+  {
+    "id": "V-31",
+    "severity": "Medium",
+    "layer": "infrastructure/security",
+    "category": "security",
+    "title": "Мёртвая защита: 19 «защитных» токенов никто не запрашивает (firewall не передан в ToolRegistry, guardrails, sanitization, HMAC-«анклав», TEE-верификатор)",
+    "status": "open",
+    "evidence": "runtime probe + scan: evidence/di-consistency.json",
+    "files": [
+      "src/infrastructure/di/modules/interaction.module.ts:65",
+      "sota-2026-multiagent.module.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": "MP-K36",
+    "owasp": "ASI10 (rogue/unmonitored)",
+    "plan_task": "T2.1",
+    "red_team": null
+  },
+  {
+    "id": "V-32",
+    "severity": "Medium",
+    "layer": "config",
+    "category": "security",
+    "title": "TLS к БД без проверки сертификата: OUTBOX_SSL → rejectUnauthorized:false; общий хелпер по умолчанию тоже без проверки без CA",
+    "status": "partly fixed",
+    "evidence": "code reading",
+    "files": [
+      "src/config/index.ts:146",
+      "src/infrastructure/persistence/pg-ssl-config.ts"
+    ],
+    "fix_commit": "Outbox TLS verifies",
+    "test": null,
+    "known_issue": "MP-K34",
+    "owasp": null,
+    "plan_task": "T2.6",
+    "red_team": "RT-8"
+  },
+  {
+    "id": "V-33",
+    "severity": "Medium",
+    "layer": "infrastructure/agent-runner",
+    "category": "security",
+    "title": "Worker исполняет сгенерированный код через new Function + with(context) в worker_thread с доступом к process (не изоляция; инъекции не найдено)",
+    "status": "open",
+    "evidence": "code reading",
+    "files": [
+      "src/infrastructure/agent-runner/worker-scripts/task-worker.ts:198"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": "MP-K37",
+    "owasp": "ASI05",
+    "plan_task": "T2.1",
+    "red_team": "RT-6"
+  },
+  {
+    "id": "V-34",
+    "severity": "Medium",
+    "layer": "deps",
+    "category": "security",
+    "title": "Уязвимости production-зависимостей: 4 (2 high: body-parser, undici), multer 1.x",
+    "status": "fixed",
+    "evidence": "runtime probe: npm audit 4 → 0",
+    "files": [
+      "package.json",
+      "package-lock.json"
+    ],
+    "fix_commit": "Dependencies: 0 production advisories",
+    "test": "CI: npm audit --omit=dev",
+    "known_issue": null,
+    "owasp": "ASI04",
+    "plan_task": null,
+    "red_team": "RT-9"
+  },
+  {
+    "id": "V-35",
+    "severity": "Medium",
+    "layer": "infrastructure/adapters",
+    "category": "performance",
+    "title": "Anthropic: меняющийся каталог function_results сливается в system → кэш префикса сбрасывается каждый шаг; нет cache_control; модели захардкожены",
+    "status": "fixed",
+    "evidence": "test",
+    "files": [
+      "src/infrastructure/adapters/llm/AnthropicChatModel.ts"
+    ],
+    "fix_commit": "AnthropicChatModel: cache-friendly prompt layout",
+    "test": "tests/unit/anthropic-chat-model.test.ts",
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T3.6",
+    "red_team": null
+  },
+  {
+    "id": "V-36",
+    "severity": "Medium",
+    "layer": "application/agents",
+    "category": "performance",
+    "title": "SSE: полный getEvents каждые 250 мс (O(n²)), цикл не прекращался при отключении клиента",
+    "status": "partly fixed",
+    "evidence": "code reading",
+    "files": [
+      "src/application/agents/register-agent-run-routes.ts"
+    ],
+    "fix_commit": "stop SSE on disconnect",
+    "test": null,
+    "known_issue": null,
+    "owasp": "API4:2023",
+    "plan_task": "T2.8",
+    "red_team": "RT-4"
+  },
+  {
+    "id": "V-37",
+    "severity": "Medium",
+    "layer": "infrastructure/events",
+    "category": "performance",
+    "title": "Event store: SERIALIZABLE + FOR UPDATE на каждый append; TIMESTAMP без зоны; GIN по payload/metadata и HNSW прямо на журнале (усиление записи)",
+    "status": "open",
+    "evidence": "code reading",
+    "files": [
+      "postgres-event-store.ts:383",
+      "001_consolidated.sql:72-140"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T2.6",
+    "red_team": null
+  },
+  {
+    "id": "V-38",
+    "severity": "Medium",
+    "layer": "infrastructure/events",
+    "category": "correctness",
+    "title": "Путь outbox при 23505 пересчитывает версии и повторяет — оптимистичная блокировка агрегата обходится для вызывающих с ожидаемой версией",
+    "status": "open",
+    "evidence": "code reading",
+    "files": [
+      "postgres-outbox.ts insertEventsAndOutboxBatch"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T1.6",
+    "red_team": null
+  },
+  {
+    "id": "V-39",
+    "severity": "Medium",
+    "layer": "core/bootstrap",
+    "category": "reliability",
+    "title": "Остановка: пул БД закрывается раньше прочих синглтонов; нет фазы «не готов» перед остановкой HTTP; сброс outbox без таймаута",
+    "status": "open",
+    "evidence": "code reading",
+    "files": [
+      "src/core/bootstrap/orchestrator.ts:260-360"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T2.9",
+    "red_team": null
+  },
+  {
+    "id": "V-40",
+    "severity": "Medium",
+    "layer": "core/di",
+    "category": "architecture",
+    "title": "Два DI-механизма (свой контейнер + inversify) и строковые токены: 356 нетипизированных resolve → класс ошибок как V-12",
+    "status": "open",
+    "evidence": "code reading",
+    "files": [
+      "src/core/di/container.ts",
+      "src/core/di/DI_TOKENS.ts (1782 строки)"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T2.3",
+    "red_team": null
+  },
+  {
+    "id": "V-41",
+    "severity": "Medium",
+    "layer": "architecture",
+    "category": "architecture",
+    "title": "Ядро нарушает собственный ADR-0003: медицина (MRI), HR, продажи, исследования, x402, «singularity/dream_state», 36 @sota-stub; 200 659 строк, 729 модулей при старте, 366 токенов, ~360 МБ RSS",
+    "status": "open",
+    "evidence": "runtime probe + scan: evidence/layers.json",
+    "files": [
+      "src/domain/healthcare",
+      "src/presentation/http/routes",
+      "sota-2026-multiagent.module.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": "MP-K38",
+    "owasp": null,
+    "plan_task": "T2.1",
+    "red_team": null
+  },
+  {
+    "id": "V-42",
+    "severity": "Medium",
+    "layer": "build",
+    "category": "security",
+    "title": "Установка из git: 291 с, 1,1 ГБ, 7 пакетов с install-скриптами (better-sqlite3, puppeteer, onnxruntime-node, node-pty, koffi, protobufjs, prepare)",
+    "status": "partly fixed",
+    "evidence": "runtime probe: git+file install",
+    "files": [
+      "package.json"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": "MP-K5",
+    "owasp": "ASI04",
+    "plan_task": "T4.1",
+    "red_team": "RT-9"
+  },
+  {
+    "id": "V-43",
+    "severity": "Medium",
+    "layer": "application/services",
+    "category": "security",
+    "title": "JWT_SECRET обязателен, но нигде не используется; аутентификация — только API-ключи (в памяти, без хеширования для env-ключей), нет OIDC",
+    "status": "open",
+    "evidence": "code reading",
+    "files": [
+      "src/config/schema/index.ts:25",
+      "src/application/services/AuthService.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": "API2:2023",
+    "plan_task": "T2.5",
+    "red_team": null
+  },
+  {
+    "id": "V-44",
+    "severity": "Medium",
+    "layer": "infrastructure/adapters",
+    "category": "correctness",
+    "title": "25+ захардкоженных идентификаторов моделей, часть несуществующих (claude-4-opus, claude-opus-4.6, claude-4.6-opus)",
+    "status": "open",
+    "evidence": "scan",
+    "files": [
+      "src/**"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T3.6",
+    "red_team": null
+  },
+  {
+    "id": "V-45",
+    "severity": "Low",
+    "layer": "application/http",
+    "category": "security",
+    "title": "/health/migration без аутентификации раскрывает внутреннее состояние rollout",
+    "status": "open",
+    "evidence": "runtime probe",
+    "files": [
+      "src/application/operational/register-operational-routes.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": "API8:2023",
+    "plan_task": "T2.4",
+    "red_team": "RT-4"
+  },
+  {
+    "id": "V-46",
+    "severity": "Low",
+    "layer": "application/memory",
+    "category": "correctness",
+    "title": "Блокировка SSRF при загрузке документа отвечает 500 вместо 4xx",
+    "status": "open",
+    "evidence": "runtime probe",
+    "files": [
+      "/api/v1/memory/ingest/url"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T2.4",
+    "red_team": null
+  },
+  {
+    "id": "V-47",
+    "severity": "Low",
+    "layer": "core/bootstrap",
+    "category": "ops",
+    "title": "Проверки целостности database/redis «проходят» за 0,17 мс — проверка отложена, отчёт вводит в заблуждение",
+    "status": "open",
+    "evidence": "runtime probe",
+    "files": [
+      "src/core/bootstrap/checks/database-check.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T2.9",
+    "red_team": null
+  },
+  {
+    "id": "V-48",
+    "severity": "Low",
+    "layer": "application/security",
+    "category": "security",
+    "title": "Профиль инструментов выбирается по префиксу имени агента (researcher-* → full) — идентичность по метке, а не по принципалу",
+    "status": "open",
+    "evidence": "code reading",
+    "files": [
+      "src/application/security/ToolPolicyService.ts"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": "ASI03",
+    "plan_task": "T3.1",
+    "red_team": "RT-3"
+  },
+  {
+    "id": "V-49",
+    "severity": "Low",
+    "layer": "all",
+    "category": "quality",
+    "title": "215 пустых catch, 21 setInterval без unref, 362 console.*, 87 прямых process.env",
+    "status": "open",
+    "evidence": "scan: evidence/hazards.json",
+    "files": [
+      "src/**"
+    ],
+    "fix_commit": null,
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": "T2.4",
+    "red_team": null
+  },
+  {
+    "id": "V-50",
+    "severity": "Low",
+    "layer": "core/kernel",
+    "category": "quality",
+    "title": "KernelStartError терял cause; имена расширений сравнивались без trim",
+    "status": "fixed",
+    "evidence": "test",
+    "files": [
+      "src/kernel.ts"
+    ],
+    "fix_commit": "kernel: ... keep error cause",
+    "test": "tests/unit/kernel-extensions.test.ts",
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": null,
+    "red_team": null
+  },
+  {
+    "id": "V-51",
+    "severity": "Low",
+    "layer": "build",
+    "category": "ops",
+    "title": "Node 24 вышел из Active LTS 20.10.2026; Node 26 станет LTS 28.10.2026 — в CI только 24, тестов не было",
+    "status": "fixed",
+    "evidence": "calendar",
+    "files": [
+      ".github/workflows/ci.yml"
+    ],
+    "fix_commit": "CI: unit tests, Node 24/26 matrix",
+    "test": null,
+    "known_issue": null,
+    "owasp": null,
+    "plan_task": null,
+    "red_team": null
+  }
+]

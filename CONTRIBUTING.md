@@ -9,10 +9,11 @@ Node.js 24.
 ```bash
 npm ci
 npm run typecheck
+npm test
 npm run build
 ```
 
-`npm test` is not part of this package. The monorepo that produces this cut keeps the test suite.
+Integration tests need a database: `TEST_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/postgres npm run test:integration` (pgvector required). Each claim in `docs/claims.md` names its test; a change to a claim changes its test in the same pull request.
 
 ## Pull requests
 

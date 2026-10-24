@@ -7,6 +7,7 @@
  * Затем Outbox-воркер публикует события в Event Bus.
  */
 
+import { randomUUID } from 'node:crypto';
 import { Pool, PoolClient, PoolConfig } from 'pg';
 import {
   IOutbox,
@@ -91,6 +92,8 @@ export interface PostgreSQLOutboxConfig extends OutboxConfig {
   circuitBreakerSuccessThreshold?: number;
   /** Seconds before a PROCESSING row can be claimed again. */
   processingLeaseSeconds?: number;
+  /** Upper bound of the retry delay; retryDelayMs is the first delay and doubles per failure. Default 5 min. */
+  retryMaxDelayMs?: number;
 
   /** Настройки схемы Event Store (куда пишутся события) */
   eventStoreConfig?: {
@@ -194,6 +197,7 @@ interface OutboxRow {
   event_metadata: string | null;
   retry_count: number;
   created_at: string;
+  lease_token?: string | null;
 }
 
 interface DlqRow {
@@ -317,6 +321,7 @@ export class PostgreSQLOutbox implements IOutbox {
       circuitBreakerFailureThreshold:
         postgresConfig.circuitBreakerFailureThreshold ?? DEFAULT_OUTBOX_CB_FAILURE_THRESHOLD,
       processingLeaseSeconds: postgresConfig.processingLeaseSeconds ?? 300,
+      retryMaxDelayMs: postgresConfig.retryMaxDelayMs ?? 300_000,
       eventStoreConfig: {
         schema: this.eventStoreSchema,
         eventsTable: this.eventStoreEventsTable
@@ -383,6 +388,15 @@ export class PostgreSQLOutbox implements IOutbox {
       await client.query(`
         CREATE INDEX IF NOT EXISTS idx_outbox_event_gsn
         ON ${this.schema}.${this.outboxTable}(event_gsn);
+      `);
+      // Same columns as migration 002_outbox_delivery.sql.
+      await client.query(`
+        ALTER TABLE ${this.schema}.${this.outboxTable}
+        ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now()
+      `);
+      await client.query(`
+        ALTER TABLE ${this.schema}.${this.outboxTable}
+        ADD COLUMN IF NOT EXISTS lease_token TEXT
       `);
       
       // 4. Проверка успешности создания
@@ -580,28 +594,48 @@ export class PostgreSQLOutbox implements IOutbox {
 
     try {
       // 1. Короткое подключение к БД только для выборки pending/failed сообщений
+      const leaseToken = randomUUID();
       let pendingMessages: OutboxRow[] = [];
       const client = await this.pool.connect();
       try {
+        // - A failed row is due only after its backoff (next_attempt_at).
+        // - An expired PROCESSING lease counts as an attempt, so a row that kills
+        //   its worker every time reaches the dead-letter queue instead of looping.
+        // - Only the oldest open version of an aggregate is claimed: v2 is not
+        //   published while v1 is pending, in flight, or waiting for a retry. A v1
+        //   that used all its retries no longer blocks (with the DLQ disabled it
+        //   stays FAILED in this table and would otherwise block v2 forever).
+        // - lease_token fences the later PUBLISHED/FAILED update to this claim.
         const result = await client.query<OutboxRow>(
           `WITH claimed AS MATERIALIZED (
-             SELECT message_id
-               FROM ${this.schema}.${this.outboxTable}
-              WHERE (status IN ('PENDING', 'FAILED') AND retry_count < $1)
-                 OR (status = 'PROCESSING'
-                     AND last_retry_at < CURRENT_TIMESTAMP - make_interval(secs => $3))
-              ORDER BY created_at ASC
+             SELECT m.message_id
+               FROM ${this.schema}.${this.outboxTable} AS m
+              WHERE ((m.status IN ('PENDING', 'FAILED') AND m.retry_count < $1 AND m.next_attempt_at <= now())
+                  OR (m.status = 'PROCESSING'
+                      AND m.last_retry_at < CURRENT_TIMESTAMP - make_interval(secs => $3)))
+                AND NOT EXISTS (
+                  SELECT 1
+                    FROM ${this.schema}.${this.outboxTable} AS earlier
+                   WHERE earlier.aggregate_id = m.aggregate_id
+                     AND earlier.aggregate_version < m.aggregate_version
+                     AND (earlier.status IN ('PENDING', 'PROCESSING')
+                          OR (earlier.status = 'FAILED' AND earlier.retry_count < $1))
+                )
+              ORDER BY m.created_at ASC
               LIMIT $2
-              FOR UPDATE SKIP LOCKED
+              FOR UPDATE OF m SKIP LOCKED
            )
            UPDATE ${this.schema}.${this.outboxTable} AS o
-              SET status = 'PROCESSING', last_retry_at = CURRENT_TIMESTAMP
+              SET status = 'PROCESSING',
+                  last_retry_at = CURRENT_TIMESTAMP,
+                  lease_token = $4,
+                  retry_count = o.retry_count + CASE WHEN o.status = 'PROCESSING' THEN 1 ELSE 0 END
              FROM claimed
             WHERE o.message_id = claimed.message_id
             RETURNING o.message_id, o.event_id, o.event_type, o.aggregate_id, o.aggregate_version,
                       o.correlation_id, o.causation_id, o.idempotency_key, o.event_timestamp,
-                      o.event_payload, o.event_metadata, o.retry_count, o.created_at`,
-          [this.config.maxRetries, size, this.config.processingLeaseSeconds]
+                      o.event_payload, o.event_metadata, o.retry_count, o.created_at, o.lease_token`,
+          [this.config.maxRetries, size, this.config.processingLeaseSeconds, leaseToken]
         );
         pendingMessages = result.rows;
         if (OUTBOX_METRICS_ON && pendingMessages.length > 0) {
@@ -615,6 +649,18 @@ export class PostgreSQLOutbox implements IOutbox {
       const publishedMessages: string[] = [];
       const failedMessages: Array<{ messageId: string; error: string }> = [];
       const failedRows: Array<{ row: OutboxRow; error: Error }> = [];
+
+      // A row whose lease expired maxRetries times is not published again. Without
+      // a DLQ it ends as FAILED with its retries used, which no later claim selects.
+      const poisoned = pendingMessages.filter((row) => row.retry_count >= this.config.maxRetries);
+      for (const row of poisoned) {
+        if (this.config.enableDeadLetterQueue) {
+          await this.moveToDeadLetterQueue(row.message_id, 'Processing lease expired too many times');
+        } else {
+          await this.markFailures([{ row, error: new Error('Processing lease expired too many times') }], leaseToken);
+        }
+      }
+      pendingMessages = pendingMessages.filter((row) => row.retry_count < this.config.maxRetries);
 
       const results = await Promise.allSettled(
         pendingMessages.map((row) => this.publishOutboxRow(row)),
@@ -637,10 +683,10 @@ export class PostgreSQLOutbox implements IOutbox {
       const processingTime = Date.now() - startTime;
 
       if (publishedMessages.length > 0) {
-        await this.markBatchAsProcessed(publishedMessages);
+        await this.markBatchAsProcessed(publishedMessages, leaseToken);
       }
       if (failedRows.length > 0) {
-        await this.markFailures(failedRows);
+        await this.markFailures(failedRows, leaseToken);
       }
 
       // Обновляем состояние circuit breaker с учётом частичных ошибок
@@ -758,7 +804,7 @@ export class PostgreSQLOutbox implements IOutbox {
     try {
       await client.query(
         `UPDATE ${this.schema}.${this.outboxTable}
-         SET status = 'PENDING', last_retry_at = CURRENT_TIMESTAMP
+         SET status = 'PENDING', last_retry_at = CURRENT_TIMESTAMP, next_attempt_at = now()
          WHERE message_id = $1 AND status = 'FAILED'`,
         [messageId]
       );
@@ -1354,19 +1400,29 @@ export class PostgreSQLOutbox implements IOutbox {
    * Использует один UPDATE с WHERE message_id = ANY($1::text[]), чтобы минимизировать
    * количество краткоживущих подключений к БД.
    */
-  private async markBatchAsProcessed(messageIds: string[]): Promise<void> {
+  private async markBatchAsProcessed(messageIds: string[], leaseToken?: string): Promise<void> {
     if (messageIds.length === 0) {
       return;
     }
 
     const client = await this.pool.connect();
     try {
-      await client.query(
+      // With a lease token, only rows still held by this claim change. A row another
+      // worker re-claimed after our lease expired stays theirs (it is delivered again:
+      // at-least-once).
+      const result = await client.query(
         `UPDATE ${this.schema}.${this.outboxTable}
-         SET status = 'PUBLISHED', published_at = CURRENT_TIMESTAMP
-         WHERE message_id = ANY($1::text[])`,
-        [messageIds]
+         SET status = 'PUBLISHED', published_at = CURRENT_TIMESTAMP, lease_token = NULL
+         WHERE message_id = ANY($1::text[])
+           AND ($2::text IS NULL OR lease_token = $2::text)`,
+        [messageIds, leaseToken ?? null]
       );
+      if (leaseToken && (result.rowCount ?? 0) < messageIds.length) {
+        this.logger?.warn?.('outbox_lease_lost', {
+          expected: messageIds.length,
+          marked: result.rowCount ?? 0,
+        });
+      }
     } finally {
       client.release();
     }
@@ -1376,7 +1432,10 @@ export class PostgreSQLOutbox implements IOutbox {
    * One UPDATE for every row this poll failed to publish.
    * A row that has used its retries then moves to the dead-letter queue.
    */
-  private async markFailures(failures: ReadonlyArray<{ row: OutboxRow; error: Error }>): Promise<void> {
+  private async markFailures(
+    failures: ReadonlyArray<{ row: OutboxRow; error: Error }>,
+    leaseToken?: string,
+  ): Promise<void> {
     if (failures.length === 0) {
       return;
     }
@@ -1386,12 +1445,21 @@ export class PostgreSQLOutbox implements IOutbox {
         `UPDATE ${this.schema}.${this.outboxTable} AS o
             SET retry_count = o.retry_count + 1,
                 status = 'FAILED',
-                last_error = v.message
-           FROM unnest($1::text[], $2::text[]) AS v(message_id, message)
-          WHERE o.message_id = v.message_id`,
+                last_error = v.message,
+                lease_token = NULL,
+                next_attempt_at = now() + make_interval(secs => v.delay_ms / 1000.0)
+           FROM unnest($1::text[], $2::text[], $3::int[]) AS v(message_id, message, delay_ms)
+          WHERE o.message_id = v.message_id
+            AND ($4::text IS NULL OR o.lease_token = $4::text)`,
         [
           failures.map((failure) => failure.row.message_id),
           failures.map((failure) => failure.error.message),
+          failures.map((failure) => outboxRetryDelayMs(
+            failure.row.retry_count + 1,
+            this.config.retryDelayMs,
+            this.config.retryMaxDelayMs,
+          )),
+          leaseToken ?? null,
         ],
       );
     } finally {
@@ -1428,6 +1496,12 @@ export class PostgreSQLOutbox implements IOutbox {
       await this.moveToDeadLetterQueue(row.message_id, `Max retries exceeded: ${error.message}`);
     }
   }
+}
+
+/** Delay before attempt `attempt` (1-based): base * 2^(attempt-1), capped, with full jitter. */
+export function outboxRetryDelayMs(attempt: number, baseMs: number, maxMs: number): number {
+  const exponential = Math.min(maxMs, baseMs * 2 ** Math.max(0, attempt - 1));
+  return Math.round(exponential * (0.5 + Math.random() * 0.5));
 }
 
 /**

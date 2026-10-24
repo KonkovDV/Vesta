@@ -63,8 +63,10 @@ export class ToolRegistry implements IToolRegistry {
   ) {}
 
   register(tool: IAgentTool): void {
+    // A second tool under the same name would shadow the first one, including its
+    // workspace checks. Refuse it; unregistering is an explicit, separate decision.
     if (this.tools.has(tool.name)) {
-      this.logger.warn(`ToolRegistry: Overwriting existing tool '${tool.name}'`);
+      throw new Error(`ToolRegistry: Tool '${tool.name}' is already registered`);
     }
     this.tools.set(tool.name, tool);
     (this.logger as ILogger).log(`ToolRegistry: Registered tool '${tool.name}'`);
@@ -88,7 +90,9 @@ export class ToolRegistry implements IToolRegistry {
     if (this.mcpDiscovery) {
       try {
         const mcpTool = await this.mcpDiscovery.findTool(name);
-        if (mcpTool) {
+        // A server may answer with any name. Only an exact match for a name that
+        // no local tool holds is accepted, so discovery never replaces a local tool.
+        if (mcpTool && mcpTool.name === name && !this.tools.has(mcpTool.name)) {
           const adaptedTool = adaptDiscoveredTool(mcpTool);
           this.tools.set(adaptedTool.name, adaptedTool);
           this.logger.info?.(`ToolRegistry: MCP tool registered on-demand '${adaptedTool.name}'`);
@@ -107,13 +111,30 @@ export class ToolRegistry implements IToolRegistry {
 
   async execute(name: string, args: unknown, context: IAgentContext): Promise<unknown> {
     const tool = await this.resolveTool(name);
-    const policyArguments = isObjectRecord(args) ? args : {};
 
     try {
-      // 0. Security Policy Evaluation (Execution Firewall)
+      // 1. Validate first. The policy must see the arguments the body will receive:
+      //    a schema can strip keys, apply defaults, or coerce types.
+      const parsedArgs: unknown = tool.schema && typeof tool.schema.parse === 'function'
+        ? tool.schema.parse(args)
+        : args;
+
+      // 2. Firewall sanitization on a copy, still before the policy decision.
+      const validatedArgs: unknown = this.firewall && isObjectRecord(parsedArgs) && !Array.isArray(parsedArgs)
+        ? Object.fromEntries(Object.entries(parsedArgs).map(([key, value]) => [
+          key,
+          typeof value === 'string' ? this.firewall!.sanitizeString(value) : value,
+        ]))
+        : parsedArgs;
+
+      if (!isObjectRecord(validatedArgs) || Array.isArray(validatedArgs)) {
+        throw new Error(`Security Violation: Tool '${name}' arguments must be an object`);
+      }
+
+      // 3. Security Policy Evaluation (Execution Firewall) on the final arguments.
       const policyResult = await this.policy.evaluate({
         toolName: name,
-        arguments: policyArguments,
+        arguments: validatedArgs,
         agentId: context.agentId,
         sessionId: context.sessionId
       });
@@ -136,22 +157,11 @@ export class ToolRegistry implements IToolRegistry {
         );
       }
 
-      // 1. Validate Arguments
-      const validatedArgs = tool.schema && typeof tool.schema.parse === 'function'
-        ? tool.schema.parse(args)
-        : args;
-
-      // 1.5 Firewall sanitization (if configured)
-      if (this.firewall && isObjectRecord(validatedArgs)) {
-        for (const key of Object.keys(validatedArgs)) {
-          if (typeof validatedArgs[key] === 'string') {
-            validatedArgs[key] = this.firewall.sanitizeString(validatedArgs[key]);
-          }
-        }
-      }
-
-      // 2. Execute
-      this.logger.debug(`ToolRegistry: Executing '${name}' for agent ${context.agentId}`, { args });
+      // 4. Execute
+      // Argument values can hold secrets or personal data; log the keys only.
+      this.logger.debug(`ToolRegistry: Executing '${name}' for agent ${context.agentId}`, {
+        argKeys: Object.keys(validatedArgs),
+      });
       const result = await tool.execute(validatedArgs, context);
 
       if (isApprovalRequiredResult(result)) {

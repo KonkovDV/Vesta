@@ -30,6 +30,12 @@ import { tryJsonParse } from '../../core/utils/json';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
 import type { IStructuredLogger } from '../../core/logging/IStructuredLogger';
 
+/** Position in commit order: the writing transaction and the event's gsn inside it. */
+export interface CommitCursor {
+  txId: string;
+  gsn: number;
+}
+
 interface PostgresEventStoreConfig {
   connection: PoolConfig;
   schema?: string;
@@ -896,6 +902,32 @@ export class PostgresEventStore implements IEventStore {
     );
  
     return events;
+  }
+
+  /**
+   * Events in commit order after `cursor`, never past a transaction that may still
+   * commit. Unlike a gsn range this does not skip an event whose transaction drew
+   * a lower gsn and committed later (MP-K23). Needs migration 003. Canonical table only.
+   */
+  async getCommittedEventsAfter(
+    cursor: CommitCursor | null,
+    limit = 500,
+  ): Promise<{ events: Array<DomainEvent & { gsn?: number }>; cursor: CommitCursor | null }> {
+    const res = await this.pool.query(
+      `SELECT ${EVENT_READ_COLUMNS}, tx_id::text AS tx_id
+         FROM ${this.qualifiedEventsTable}
+        WHERE tx_id < pg_snapshot_xmin(pg_current_snapshot())
+          AND (tx_id, gsn) > ($1::xid8, $2::bigint)
+        ORDER BY tx_id, gsn
+        LIMIT $3`,
+      [cursor?.txId ?? '0', cursor?.gsn ?? 0, limit],
+    );
+    const events = res.rows.map(rowToEvent);
+    const last = res.rows.at(-1) as { tx_id: string; gsn: string | number } | undefined;
+    return {
+      events,
+      cursor: last ? { txId: String(last.tx_id), gsn: Number(last.gsn) } : cursor,
+    };
   }
 
   async getLatestGsn(): Promise<number | null> {

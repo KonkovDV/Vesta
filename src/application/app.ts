@@ -85,7 +85,7 @@ export interface HttpAppDependencies {
   masterAgent: import('./agents/core/master-agent').IMasterAgent;
   masPolicyService: MasPolicyService;
   eventStoreService: EventStoreService;
-  agentRuns?: Pick<import('./agents/AgentRunService').AgentRunService, 'start'>;
+  agentRuns?: import('./agents/register-agent-run-routes').AgentRunRoutesService;
   /** Optional workspace root override — avoids process.cwd() in Application layer */
   workspaceRoot?: string;
   /** Transitional seam for presentation route mounting */
@@ -143,31 +143,30 @@ function getRequestMethod(req: ExpressRequest): string {
   return req.method || 'GET';
 }
 
+/** Path without the query string: a query can carry api_key and must not reach the log. */
 function getRequestPath(req: ExpressRequest): string {
-  return req.originalUrl || req.url;
+  const url = req.originalUrl || req.url;
+  const query = url.indexOf('?');
+  return query >= 0 ? url.slice(0, query) : url;
 }
 
-function getRequestRouteHint(req: ExpressRequest): string {
-  return (req as RequestWithOptionalRoute).route?.path || req.path;
+/**
+ * Route template for metric labels, read after routing (on 'finish'). A raw path
+ * would create one time series per id, which grows without bound.
+ */
+export function getRequestRouteLabel(req: ExpressRequest): string {
+  const routePath = (req as RequestWithOptionalRoute).route?.path;
+  if (typeof routePath === 'string' && routePath.length > 0) {
+    return `${req.baseUrl ?? ''}${routePath}`;
+  }
+  return 'unmatched';
 }
 
-function getClientIdentifier(req: ExpressRequest): string {
-  const forwardedFor = req.headers['x-forwarded-for'];
-
-  if (typeof forwardedFor === 'string') {
-    const firstHop = forwardedFor.split(',')[0]?.trim();
-    if (firstHop) {
-      return firstHop;
-    }
-  }
-
-  if (Array.isArray(forwardedFor)) {
-    const firstHop = forwardedFor[0]?.trim();
-    if (firstHop) {
-      return firstHop;
-    }
-  }
-
+/**
+ * The client address as Express computed it from `trust proxy`. X-Forwarded-For
+ * is client-controlled unless a trusted proxy wrote it, so it is not read here.
+ */
+export function getClientIdentifier(req: ExpressRequest): string {
   return req.ip || req.socket?.remoteAddress || 'unknown';
 }
 
@@ -182,7 +181,8 @@ function createIngressRateLimitMiddleware(
   return async (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
     try {
       const identifier = getClientIdentifier(req);
-      const endpoint = getRequestPath(req);
+      // The bucket is per client; a query string or an id in the path must not open a new one.
+      const endpoint = '/api';
       const result = await httpRateLimiter.checkLimit(identifier, endpoint, 1);
 
       res.setHeader('X-RateLimit-Limit', String(result.limit));
@@ -508,9 +508,9 @@ function createHttpApp(deps?: Partial<HttpAppDependencies>) {
   const LAYER_APPLICATION = 'application';
   app.use((req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
     const start = process.hrtime.bigint();
-    const routeHint = getRequestRouteHint(req);
 
     res.on('finish', () => {
+      const routeHint = getRequestRouteLabel(req);
       const end = process.hrtime.bigint();
       const durSec = Number(end - start) / 1e9;
       const labels = {

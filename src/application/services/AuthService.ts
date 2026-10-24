@@ -11,7 +11,7 @@
 
 import { ProtocolErrorCode, ProtocolUtils } from '../../protocol/index';
 import type { IAuthService, AuthContext as CoreAuthContext } from '../../core/auth/IAuthService';
-import { getConfig } from '../../config';
+import { getConfig, getRawEnv } from '../../config';
 import type { AppConfig } from '../../config/schema';
 import { tryJsonParse } from '../../core/utils/json';
 import type { ApiKeyService } from './ApiKeyService';
@@ -72,6 +72,14 @@ function createProtocolAuthError(message: string, status = 401): Error {
 function isProductionNodeEnv(nodeEnv: string | undefined): boolean {
   const normalized = (nodeEnv || '').toLowerCase();
   return normalized === 'production' || normalized === 'prod';
+}
+
+/**
+ * A key in the query string ends up in proxy logs, browser history and Referer.
+ * It is accepted only outside production and only with ALLOW_QUERY_API_KEY=true.
+ */
+function allowQueryApiKey(nodeEnv: string | undefined): boolean {
+  return !isProductionNodeEnv(nodeEnv) && getRawEnv().ALLOW_QUERY_API_KEY === 'true';
 }
 
 function extractApiKeyFromRequestValue(req: {
@@ -224,7 +232,7 @@ export class AuthService implements IAuthService {
     query?: Record<string, unknown>;
     body?: unknown;
   }): Promise<AuthContext> {
-    const token = extractApiKeyFromRequestValue(req, !isProductionNodeEnv(this.config.NODE_ENV));
+    const token = extractApiKeyFromRequestValue(req, allowQueryApiKey(this.config.NODE_ENV));
     return this.authenticateInternal(token);
   }
 
@@ -401,7 +409,7 @@ export class AuthService implements IAuthService {
     headers?: Record<string, unknown>;
     query?: Record<string, unknown>;
   }): string {
-    return extractApiKeyFromRequestValue(req, !isProductionNodeEnv(this.config.NODE_ENV));
+    return extractApiKeyFromRequestValue(req, allowQueryApiKey(this.config.NODE_ENV));
   }
 
   // Реализация IAuthService.authError.

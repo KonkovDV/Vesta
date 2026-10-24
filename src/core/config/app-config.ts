@@ -17,7 +17,11 @@ function getSnapshot(): AppConfig {
 
 export function readBool<K extends keyof AppConfig>(name: K, def: boolean): boolean {
   const config = getSnapshot();
-  const raw = config[name];
+  const raw: unknown = config[name];
+  // The schema may already have coerced the value (z.coerce / z.boolean()).
+  if (typeof raw === 'boolean') {
+    return raw;
+  }
   if (typeof raw !== 'string' || raw.trim() === '') {
     return def;
   }
@@ -27,7 +31,11 @@ export function readBool<K extends keyof AppConfig>(name: K, def: boolean): bool
 
 export function readInt<K extends keyof AppConfig>(name: K, def: number): number {
   const config = getSnapshot();
-  const raw = config[name];
+  const raw: unknown = config[name];
+  // REDIS_PORT and REDIS_DB are z.coerce.number() in the schema: a number arrives here.
+  if (typeof raw === 'number') {
+    return Number.isFinite(raw) ? Math.trunc(raw) : def;
+  }
   if (typeof raw !== 'string' || raw.trim() === '') {
     return def;
   }
@@ -40,7 +48,10 @@ export function readStr<K extends keyof AppConfig>(
   def?: string,
 ): string | undefined {
   const config = getSnapshot();
-  const raw = config[name];
+  const raw: unknown = config[name];
+  if (typeof raw === 'number' || typeof raw === 'boolean') {
+    return String(raw);
+  }
   if (typeof raw !== 'string' || raw === '') {
     return def;
   }

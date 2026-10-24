@@ -1,4 +1,5 @@
 import * as fs from 'fs/promises';
+import { constants as fsConstants } from 'fs';
 import type { Dirent } from 'fs';
 import * as path from 'path';
 import { IMicroPhoenixPlugin, IPluginContext, PluginManifest } from '../../../domain/plugins/microphoenix-plugin.port';
@@ -27,7 +28,7 @@ export default class FileSystemPlugin implements IMicroPhoenixPlugin {
       execute: async (args) => {
         try {
           const typedArgs = args as { path: string };
-          const safePath = this.validatePath(typedArgs.path);
+          const safePath = await this.resolveInside(typedArgs.path);
           const content = await fs.readFile(safePath, 'utf-8');
           return content;
         } catch (error) {
@@ -48,10 +49,18 @@ export default class FileSystemPlugin implements IMicroPhoenixPlugin {
       execute: async (args) => {
         try {
           const typedArgs = args as { path: string; content: string };
-          const safePath = this.validatePath(typedArgs.path);
+          const safePath = await this.resolveInside(typedArgs.path);
           // Ensure directory exists
           await fs.mkdir(path.dirname(safePath), { recursive: true });
-          await fs.writeFile(safePath, typedArgs.content, 'utf-8');
+          // Re-check after mkdir: a directory created by someone else may be a link.
+          await this.resolveInside(typedArgs.path);
+          // 'wx' would refuse overwrite; O_NOFOLLOW refuses a symlink at the final component.
+          const handle = await fs.open(safePath, fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_TRUNC | fsConstants.O_NOFOLLOW, 0o600);
+          try {
+            await handle.writeFile(typedArgs.content, 'utf-8');
+          } finally {
+            await handle.close();
+          }
           return `Success: File written to ${typedArgs.path}`;
         } catch (error) {
           return `Error writing file: ${(error as Error).message}`;
@@ -71,7 +80,7 @@ export default class FileSystemPlugin implements IMicroPhoenixPlugin {
         try {
           const typedArgs = args as { path?: string };
           const targetPath = typedArgs.path || '.';
-          const safePath = this.validatePath(targetPath);
+          const safePath = await this.resolveInside(targetPath);
           const entries = await fs.readdir(safePath, { withFileTypes: true });
           
           return JSON.stringify(entries.map((e: Dirent) => ({
@@ -90,18 +99,39 @@ export default class FileSystemPlugin implements IMicroPhoenixPlugin {
   }
 
   /**
-   * Validates that the requested path is within the sandbox root.
-   * Prevents Directory Traversal attacks.
+   * The requested path, resolved through every symlink of its existing part, must
+   * stay inside the real sandbox root. A prefix test on the joined string accepted
+   * a sibling such as sandbox/fs-other and any link that pointed out.
    */
-  private validatePath(userPath: string): string {
-    // Normalize path to resolve '..' and '.'
-    const safePath = path.normalize(path.join(this.sandboxRoot, userPath));
-
-    // Check if the resolved path starts with the sandbox root
-    if (!safePath.startsWith(this.sandboxRoot)) {
+  async resolveInside(userPath: string): Promise<string> {
+    const root = await fs.realpath(this.sandboxRoot);
+    const requested = path.resolve(root, userPath);
+    if (!isWithin(root, requested)) {
       throw new Error(`Access Denied: Path '${userPath}' attempts to access outside sandbox.`);
     }
-
-    return safePath;
+    // Walk up to the deepest part that exists and resolve it for real.
+    let existing = requested;
+    let suffix = '';
+    for (;;) {
+      try {
+        const real = await fs.realpath(existing);
+        const resolved = suffix ? path.join(real, suffix) : real;
+        if (!isWithin(root, resolved)) {
+          throw new Error(`Access Denied: Path '${userPath}' resolves outside sandbox.`);
+        }
+        return resolved;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        const parent = path.dirname(existing);
+        if (parent === existing) throw error;
+        suffix = suffix ? path.join(path.basename(existing), suffix) : path.basename(existing);
+        existing = parent;
+      }
+    }
   }
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }

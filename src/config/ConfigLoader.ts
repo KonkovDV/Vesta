@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { AppConfigSchema, AppConfig } from './schema';
-import { loadConfigFromEnv, getRawEnv } from './index';
+import { loadConfigFromEnv, getRawEnv, reloadConfig } from './index';
 import * as dotenv from 'dotenv';
 import * as path from 'path';
 import { FSWatcher, watch } from 'fs';
@@ -39,6 +39,8 @@ export class ConfigLoader {
 
     public load(): AppConfig {
         dotenv.config({ path: this.envPath });
+        // The file may add variables after getConfig() cached its first parse.
+        reloadConfig();
 
         // Reload environment variables to catch any changes if called multiple times
         const env = getRawEnv();

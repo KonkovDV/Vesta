@@ -3,7 +3,7 @@
  * Layer: Application
  */
 
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { z } from 'zod';
 import type { IAgentContext } from '../../../domain/agents/agent-context.interface';
@@ -11,6 +11,9 @@ import type { IAgentTool } from '../../../domain/agents/tools.interface';
 import type { IPromptInjectionScanner } from '../../../domain/security/prompt-injection-scanner.port';
 import { isInsideWorkspace } from './workspace-path';
 import { flagInjection } from './untrusted-output';
+
+/** The whole file is read before the line window is cut; keep that bounded. */
+const MAX_READ_BYTES = 10 * 1024 * 1024;
 
 export const ReadFileToolSchema = z.object({
   path: z.string().min(1),
@@ -42,7 +45,16 @@ export class WorkspaceReadFileTool implements IAgentTool {
     if (stat.isSymbolicLink() || !stat.isFile()) {
       return { error: 'path must be a regular file' };
     }
-    const text = await readFile(resolved, 'utf8');
+    // lstat sees only the last component. A linked directory on the way
+    // (workspace/link -> /etc) would still lead outside, so compare real paths.
+    const [realRoot, realFile] = await Promise.all([realpath(context.workspaceRoot), realpath(resolved)]);
+    if (!isInsideWorkspace(realRoot, realFile)) {
+      return { error: 'path is outside workspaceRoot' };
+    }
+    if (stat.size > MAX_READ_BYTES) {
+      return { error: `file is larger than ${MAX_READ_BYTES} bytes; read a smaller file or use search_text` };
+    }
+    const text = await readFile(realFile, 'utf8');
     const lines = text.split(/\r?\n/);
     const offset = input.offset ?? 0;
     const limit = input.limit ?? 200;

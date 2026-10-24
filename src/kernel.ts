@@ -12,6 +12,7 @@ import path from 'node:path';
 
 import type { HttpRouteRegistrar } from './application/app';
 import type { DIContainer } from './core/di/container';
+import type { IToolExecutionPolicy } from './domain/security/tool-execution-policy.interface';
 
 export * from './ai-types';
 export type { HttpRouteRegistrar, HttpRouteRegistrationContext } from './application/app';
@@ -44,14 +45,84 @@ export interface KernelExtension {
   readonly routes?: HttpRouteRegistrar;
   /** Applied after kernel migrations: `microphoenix-migrate --dir <migrationsDir>`. */
   readonly migrationsDir?: string;
+  /**
+   * Added to the kernel tool policy. It can deny a call or require approval for it;
+   * it cannot allow what the kernel policy denies. This is how a product asks for a
+   * person before its own side effects, since the kernel policy token cannot be replaced.
+   */
+  readonly toolPolicy?: IToolExecutionPolicy;
 }
 
 /** Startup failed before the server was listening. The process is still running. */
 export class KernelStartError extends Error {
-  constructor(message: string) {
-    super(message);
+  constructor(message: string, options?: { cause?: unknown }) {
+    super(message, options);
     this.name = 'KernelStartError';
   }
+}
+
+/** An extension tried to replace or remove a registration it does not own. */
+export class KernelExtensionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'KernelExtensionError';
+  }
+}
+
+/**
+ * Container methods an extension may not call. Each of them can drop or swap a
+ * kernel registration (for example the tool policy) without going through `register`.
+ */
+const EXTENSION_BLOCKED_METHODS: ReadonlySet<PropertyKey> = new Set([
+  'unregister',
+  'setAllowOverrides',
+  'clear',
+  'clearInstances',
+  'dispose',
+  'disposeScope',
+  'setAspectManager',
+  'setAmbientScopeProvider',
+]);
+
+/**
+ * The container an extension sees. `register` refuses a token that is already
+ * registered, whatever the global override flag says, and a factory receives this
+ * view too, so it cannot reach the unguarded container at resolve time.
+ */
+export function createExtensionContainer(container: DIContainer, extensionName: string): DIContainer {
+  const guarded: DIContainer = new Proxy(container, {
+    get(target, property) {
+      if (property === 'register') {
+        return (token: string | symbol, factory: (c: DIContainer) => unknown, options?: unknown) => {
+          if (target.isRegistered(token)) {
+            throw new KernelExtensionError(
+              `Kernel extension "${extensionName}" cannot replace the registered token ${String(token)}`,
+            );
+          }
+          if (typeof factory !== 'function') {
+            throw new KernelExtensionError(
+              `Kernel extension "${extensionName}" registered ${String(token)} without a factory`,
+            );
+          }
+          return target.register(
+            token,
+            () => factory(guarded),
+            options as Parameters<DIContainer['register']>[2],
+          );
+        };
+      }
+      if (EXTENSION_BLOCKED_METHODS.has(property)) {
+        return () => {
+          throw new KernelExtensionError(
+            `Kernel extension "${extensionName}" may not call container.${String(property)}()`,
+          );
+        };
+      }
+      const value: unknown = Reflect.get(target, property, target);
+      return typeof value === 'function' ? (value as (...args: unknown[]) => unknown).bind(target) : value;
+    },
+  });
+  return guarded;
 }
 
 export interface KernelOptions {
@@ -61,6 +132,7 @@ export interface KernelOptions {
 }
 
 const ROUTE_REGISTRAR_TOKEN = 'HttpRouteRegistrar';
+const TOOL_POLICY_TOKEN = 'IToolExecutionPolicy';
 
 export function extensionMigrationDirs(extensions: readonly KernelExtension[]): string[] {
   return extensions
@@ -75,19 +147,32 @@ export async function applyKernelExtensions(
 ): Promise<void> {
   const names = new Set<string>();
   extensions.forEach((extension) => {
-    if (extension.name.trim().length === 0) {
+    const name = typeof extension.name === 'string' ? extension.name.trim() : '';
+    if (name.length === 0) {
       throw new Error('Kernel extension name is empty');
     }
-    if (names.has(extension.name)) {
-      throw new Error(`Kernel extension "${extension.name}" is listed twice`);
+    if (names.has(name)) {
+      throw new Error(`Kernel extension "${name}" is listed twice`);
     }
-    names.add(extension.name);
+    names.add(name);
   });
 
-  await extensions.reduce(async (previous, extension) => {
-    await previous;
-    await extension.register?.(container);
-  }, Promise.resolve());
+  for (const extension of extensions) {
+    await extension.register?.(createExtensionContainer(container, extension.name.trim()));
+  }
+
+  const policies = extensions.filter((extension) => extension.toolPolicy !== undefined);
+  if (policies.length > 0) {
+    const kernelPolicy = container.isRegistered(TOOL_POLICY_TOKEN)
+      ? container.resolve<IToolExecutionPolicy & { addConstraint?(policy: IToolExecutionPolicy): void }>(TOOL_POLICY_TOKEN)
+      : undefined;
+    if (!kernelPolicy || typeof kernelPolicy.addConstraint !== 'function') {
+      throw new KernelExtensionError('The kernel tool policy does not accept extension constraints');
+    }
+    for (const extension of policies) {
+      kernelPolicy.addConstraint(extension.toolPolicy as IToolExecutionPolicy);
+    }
+  }
 
   const routes = extensions
     .map((extension) => extension.routes)
@@ -320,6 +405,6 @@ export async function runKernel(options: KernelOptions = {}): Promise<{ app: unk
     if (err instanceof KernelStartError) {
       throw err;
     }
-    throw new KernelStartError(err instanceof Error ? err.message : String(err));
+    throw new KernelStartError(err instanceof Error ? err.message : String(err), { cause: err });
   }
 }

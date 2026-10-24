@@ -46,6 +46,13 @@ function redactValue(value: unknown, depth = 0, seen = new WeakSet<object>()): u
   return out;
 }
 
+function isClientError(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const record = error as { status?: unknown; statusCode?: unknown };
+  const status = typeof record.status === 'number' ? record.status : record.statusCode;
+  return typeof status === 'number' && status >= 400 && status < 500;
+}
+
 export class LoggingAspect implements Aspect {
   private readonly logger: ILogger;
   private readonly options: Required<LoggingAspectOptions>;
@@ -57,7 +64,9 @@ export class LoggingAspect implements Aspect {
       includeResult: options.includeResult ?? false,
       includeMetadata: options.includeMetadata ?? false,
       includeDuration: options.includeDuration ?? true,
-      level: options.level ?? 'log',
+      // Every matched method call writes start and success. At info level that was
+      // several kilobytes of log per request; it is a debugging aid.
+      level: options.level ?? 'debug',
       errorLevel: options.errorLevel ?? 'error',
       slowCallThresholdMs: options.slowCallThresholdMs ?? 500,
     };
@@ -100,8 +109,10 @@ export class LoggingAspect implements Aspect {
       payload.error = this.formatError(error);
       payload.durationMs = duration;
 
+      // A 4xx (a missing key, a validation error) is the caller's mistake, not a
+      // fault: at error level it fed the runtime error-lesson capture on every 401.
       this.write(
-        this.options.errorLevel,
+        isClientError(error) ? 'warn' : this.options.errorLevel,
         `[AOP][${context.joinPoint.className}.${context.methodName}] failed`,
         payload,
       );
@@ -172,7 +183,8 @@ export class LoggingAspect implements Aspect {
       return {
         name: error.name,
         message: error.message,
-        stack: error.stack,
+        // A client error has no fault to locate; its stack is noise in every 4xx line.
+        ...(isClientError(error) ? {} : { stack: error.stack }),
       };
     }
     return {

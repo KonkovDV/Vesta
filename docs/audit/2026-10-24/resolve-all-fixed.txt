@@ -1,0 +1,28 @@
+RESOLVE-ALL registered=367 failed=27
+FAIL IArticleSummarizer: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL ITrendAnalyzer: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IUnitOfWork: No active scope for scoped dependency: IUnitOfWork
+FAIL IAutoTrapGenerator: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL ILlmTrajectoryIntelligenceExtractor: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL LLMAdapterFactory: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL ISandboxPool: Sandbox pool not initialized. Call initializeSandboxServices() first.
+FAIL ResearchAssistanceUseCase: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL ILlmJudge: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IReflectionLoop: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IPromptClassifier: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IStructuredReasoningProtocol: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL ISelfCorrectionAgent: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IGoalEvaluator: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IResponseEvaluator: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IOutputGuardrailPipeline: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IIterativeRefiner: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL ITaskPrioritizer: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IEvolutionEngine: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IFitnessEvaluator: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IPromptChainExecutor: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IDeepResearchService: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IAgentDialogueLoop: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL ICostAwareModelSelector: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IReviewerPanel: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IResearchLabOrchestrator: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.
+FAIL IToolResultSummarizer: No LLM providers configured. Please set OPENAI_API_KEY or other provider credentials.

@@ -94,6 +94,7 @@ import { getBootstrapLogger } from '../../core/logging/bootstrap-logger';
 import { PluginAutoLoader } from '../plugins/PluginAutoLoader';
 import { PluginLoader } from '../plugins/PluginLoader';
 import { PluginLifecycleManager } from './plugin-container';
+import { PluginRegistry as PluginRuntimeRegistry } from '../plugins/PluginRegistry';
 import { restoreTerminalState } from '../terminal/restore';
 
 export { setupContainer, createProductionContainer, createDevelopmentContainer, createTestContainer } from './bootstrap.test-utils';
@@ -172,10 +173,17 @@ export async function bootstrap(config: BootstrapConfig = {}): Promise<typeof co
     // Register IContainer (Self-binding for PluginLoader)
     container.register('IContainer', () => container, { lifecycle: 'singleton' });
 
+    // The loader needs the runtime registry (getPlugin/register/updateState).
+    // 'IPluginRegistry' is the application route registry, a different class: the
+    // string token hid that, and every standard plugin failed to load.
+    container.register('PluginRuntimeRegistry', (c) => new PluginRuntimeRegistry(
+        c.resolve('ILogger')
+    ), { lifecycle: 'singleton' });
+
     // Register PluginLoader
     container.register('PluginLoader', (c) => new PluginLoader(
         c.resolve('ILogger'),
-        c.resolve('IPluginRegistry'),
+        c.resolve<PluginRuntimeRegistry>('PluginRuntimeRegistry'),
         c.resolve('PluginLifecycleManager'),
         c.resolve('IContainer'),
         c.resolve('IToolRegistry')

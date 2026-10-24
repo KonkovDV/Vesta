@@ -81,6 +81,8 @@ export interface PinnedExchangeOptions {
   body?: string;
   timeoutMs: number;
   signal?: AbortSignal;
+  /** Response body cap. Default 1 MiB. The socket is destroyed past it. */
+  maxBytes?: number;
 }
 
 export interface PinnedExchangeResult {
@@ -106,14 +108,28 @@ export async function pinnedExchange(
     options.timeoutMs,
     options.signal,
   );
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_BYTES;
   const chunks: Buffer[] = [];
+  let total = 0;
+  // The socket timeout is an idle timeout; a peer that drips bytes would keep it alive.
+  const deadline = setTimeout(() => {
+    opened.stream.destroy(new SsrfPinnedHttpError('timeout', `Timed out after ${options.timeoutMs}ms`));
+  }, options.timeoutMs);
+  deadline.unref?.();
   try {
     for await (const chunk of opened.stream) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+      const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+      total += buffer.length;
+      if (total > maxBytes) {
+        throw new SsrfPinnedHttpError('response_too_large', `Response exceeds ${maxBytes} bytes`);
+      }
+      chunks.push(buffer);
     }
   } catch (error) {
     opened.abort();
     throw error;
+  } finally {
+    clearTimeout(deadline);
   }
   return {
     statusCode: opened.statusCode,
@@ -132,13 +148,17 @@ export function createPinnedFetch(guard: { pinUrl(url: string): Promise<PinnedEn
     let current = requestUrl(input);
     let method = (init?.method ?? (typeof Request !== 'undefined' && input instanceof Request ? input.method : 'GET')).toUpperCase();
     let body = bodyText(init?.body);
+    if (init?.body != null && body === undefined) {
+      throw new TypeError('createPinnedFetch sends string, Uint8Array or URLSearchParams bodies only');
+    }
+    let headers = headerRecord(init?.headers);
     const manual = init?.redirect === 'manual';
     for (let hop = 0; hop <= 3; hop += 1) {
       const pinned = await guard.pinUrl(current);
       const opened = await openPinnedSocket(
         pinned,
         method,
-        headerRecord(init?.headers),
+        headers,
         body,
         30_000,
         init?.signal ?? undefined,
@@ -156,6 +176,10 @@ export function createPinnedFetch(guard: { pinUrl(url: string): Promise<PinnedEn
       if (pinned.protocol === 'https:' && next.protocol === 'http:') {
         throw new SsrfBlockedError(next.hostname, 'Redirect from https to http is blocked');
       }
+      // Fetch drops credentials on a cross-origin redirect; this client must too.
+      if (next.origin !== new URL(current).origin) {
+        headers = withoutCredentialHeaders(headers);
+      }
       current = next.href;
       if (opened.statusCode === 303 || ((opened.statusCode === 301 || opened.statusCode === 302) && method === 'POST')) {
         method = 'GET';
@@ -164,6 +188,14 @@ export function createPinnedFetch(guard: { pinUrl(url: string): Promise<PinnedEn
     }
     throw new SsrfBlockedError(current, 'Stopped after 3 redirects');
   };
+}
+
+const CREDENTIAL_HEADERS = new Set(['authorization', 'cookie', 'proxy-authorization']);
+
+export function withoutCredentialHeaders(headers: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(headers).filter(([name]) => !CREDENTIAL_HEADERS.has(name.toLowerCase())),
+  );
 }
 
 function bodyText(body: BodyInit | null | undefined): string | undefined {

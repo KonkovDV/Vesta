@@ -12,6 +12,7 @@
 
 import { SecurityError, ConfigurationError } from '../../domain/errors/DomainError';
 import * as dns from 'node:dns';
+import { BlockList, isIP } from 'node:net';
 import { promisify } from 'node:util';
 
 const dnsResolve4 = promisify(dns.resolve4);
@@ -48,26 +49,94 @@ const DEFAULT_CONFIG: SsrfGuardConfig = {
 /** Validate CIDR notation: 'x.x.x.x/N' where N ∈ [0,32] */
 const CIDR_PATTERN = /^(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\/(\d{1,2})$/;
 
-// ─── Private IP Ranges (IPv4) ────────────────────────────────────────────────
+// ─── Special-purpose ranges ──────────────────────────────────────────────────
 
 /**
- * RFC 1918 + RFC 5737 + RFC 6598 + loopback + link-local private ranges.
+ * IANA IPv4 / IPv6 special-purpose registries (RFC 6890 and updates): every range
+ * that is not globally reachable, plus multicast. An address inside one of these
+ * is refused unless allowedCidrs names it.
  */
-const PRIVATE_RANGES: readonly { prefix: number; mask: number; label: string }[] = [
-  { prefix: 0x0A000000, mask: 0xFF000000, label: '10.0.0.0/8 (RFC 1918)' },     // 10.x.x.x
-  { prefix: 0xAC100000, mask: 0xFFF00000, label: '172.16.0.0/12 (RFC 1918)' },   // 172.16-31.x.x
-  { prefix: 0xC0A80000, mask: 0xFFFF0000, label: '192.168.0.0/16 (RFC 1918)' },  // 192.168.x.x
-  { prefix: 0x7F000000, mask: 0xFF000000, label: '127.0.0.0/8 (loopback)' },     // 127.x.x.x
-  { prefix: 0xA9FE0000, mask: 0xFFFF0000, label: '169.254.0.0/16 (link-local)' }, // 169.254.x.x
-  { prefix: 0x00000000, mask: 0xFF000000, label: '0.0.0.0/8 (this network)' },   // 0.x.x.x
-  { prefix: 0xC0000000, mask: 0xFFFFFFF8, label: '192.0.0.0/29 (IETF)' },       // 192.0.0.0-7
-  { prefix: 0xC0000200, mask: 0xFFFFFF00, label: '192.0.2.0/24 (TEST-NET-1)' },  // RFC 5737
-  { prefix: 0xC6336400, mask: 0xFFFFFF00, label: '198.51.100.0/24 (TEST-NET-2)' },
-  { prefix: 0xCB007100, mask: 0xFFFFFF00, label: '203.0.113.0/24 (TEST-NET-3)' },
-  { prefix: 0x64400000, mask: 0xFFC00000, label: '100.64.0.0/10 (CGN, RFC 6598)' },
-  { prefix: 0xE0000000, mask: 0xF0000000, label: '224.0.0.0/4 (multicast)' },    // 224-239.x.x.x
-  { prefix: 0xF0000000, mask: 0xF0000000, label: '240.0.0.0/4 (reserved)' },     // 240-255.x.x.x
+const BLOCKED_V4: ReadonlyArray<readonly [string, number, string]> = [
+  ['0.0.0.0', 8, '0.0.0.0/8 (this network)'],
+  ['10.0.0.0', 8, '10.0.0.0/8 (RFC 1918)'],
+  ['100.64.0.0', 10, '100.64.0.0/10 (CGN, RFC 6598)'],
+  ['127.0.0.0', 8, '127.0.0.0/8 (loopback)'],
+  ['169.254.0.0', 16, '169.254.0.0/16 (link-local)'],
+  ['172.16.0.0', 12, '172.16.0.0/12 (RFC 1918)'],
+  ['192.0.0.0', 24, '192.0.0.0/24 (IETF protocol assignments)'],
+  ['192.0.2.0', 24, '192.0.2.0/24 (TEST-NET-1)'],
+  ['192.88.99.0', 24, '192.88.99.0/24 (6to4 relay anycast)'],
+  ['192.168.0.0', 16, '192.168.0.0/16 (RFC 1918)'],
+  ['198.18.0.0', 15, '198.18.0.0/15 (benchmarking)'],
+  ['198.51.100.0', 24, '198.51.100.0/24 (TEST-NET-2)'],
+  ['203.0.113.0', 24, '203.0.113.0/24 (TEST-NET-3)'],
+  ['224.0.0.0', 4, '224.0.0.0/4 (multicast)'],
+  ['240.0.0.0', 4, '240.0.0.0/4 (reserved, broadcast)'],
 ];
+
+const BLOCKED_V6: ReadonlyArray<readonly [string, number, string]> = [
+  ['::', 96, '::/96 (unspecified, loopback, IPv4-compatible)'],
+  ['64:ff9b:1::', 48, '64:ff9b:1::/48 (local-use NAT64)'],
+  ['100::', 64, '100::/64 (discard)'],
+  ['2001::', 23, '2001::/23 (IETF protocol assignments, Teredo)'],
+  ['2001:db8::', 32, '2001:db8::/32 (documentation)'],
+  ['2002::', 16, '2002::/16 (6to4)'],
+  ['3fff::', 20, '3fff::/20 (documentation)'],
+  ['5f00::', 16, '5f00::/16 (SRv6 SIDs)'],
+  ['fc00::', 7, 'fc00::/7 (unique-local)'],
+  ['fe80::', 10, 'fe80::/10 (link-local)'],
+  ['fec0::', 10, 'fec0::/10 (site-local, deprecated)'],
+  ['ff00::', 8, 'ff00::/8 (multicast)'],
+];
+
+function compileRanges(
+  ranges: ReadonlyArray<readonly [string, number, string]>,
+  family: 'ipv4' | 'ipv6',
+): ReadonlyArray<{ list: BlockList; label: string }> {
+  return ranges.map(([network, prefix, label]) => {
+    const list = new BlockList();
+    list.addSubnet(network, prefix, family);
+    return { list, label };
+  });
+}
+
+const BLOCKED_V4_LISTS = compileRanges(BLOCKED_V4, 'ipv4');
+const BLOCKED_V6_LISTS = compileRanges(BLOCKED_V6, 'ipv6');
+
+/** Eight 16-bit words of an IPv6 address, or undefined when the text is not one. */
+export function ipv6Words(address: string): number[] | undefined {
+  let text = address.replace(/^\[|\]$/g, '').toLowerCase();
+  const zone = text.indexOf('%');
+  if (zone >= 0) text = text.slice(0, zone);
+  if (isIP(text) !== 6) return undefined;
+  const lastColon = text.lastIndexOf(':');
+  const tail = text.slice(lastColon + 1);
+  if (tail.includes('.')) {
+    const octets = tail.split('.').map(Number);
+    text = `${text.slice(0, lastColon + 1)}${((octets[0] << 8) | octets[1]).toString(16)}:${((octets[2] << 8) | octets[3]).toString(16)}`;
+  }
+  const halves = text.split('::');
+  const head = halves[0] ? halves[0].split(':') : [];
+  const rest = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const fill = halves.length === 2 ? 8 - head.length - rest.length : 0;
+  const words = [...head, ...Array<string>(fill).fill('0'), ...rest].map((word) => Number.parseInt(word, 16));
+  return words.length === 8 && words.every((word) => Number.isInteger(word) && word >= 0 && word <= 0xffff)
+    ? words
+    : undefined;
+}
+
+/**
+ * The IPv4 address an IPv6 address hands traffic to: IPv4-mapped (::ffff:0:0/96)
+ * and the well-known NAT64 prefix (64:ff9b::/96). A socket to either reaches that
+ * IPv4 host, so it is checked as IPv4.
+ */
+export function embeddedIpv4(words: readonly number[]): string | undefined {
+  const zeros = (from: number, to: number) => words.slice(from, to).every((word) => word === 0);
+  const mapped = zeros(0, 5) && words[5] === 0xffff;
+  const nat64 = words[0] === 0x64 && words[1] === 0xff9b && zeros(2, 6);
+  if (!mapped && !nat64) return undefined;
+  return [words[6] >> 8, words[6] & 0xff, words[7] >> 8, words[7] & 0xff].join('.');
+}
 
 // ─── Error Types ─────────────────────────────────────────────────────────────
 
@@ -281,14 +350,11 @@ export class SsrfDnsGuard {
   // ─── Helpers ────────────────────────────────────────────────────────
 
   private isIpv4(value: string): boolean {
-    return /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(value);
+    return isIP(value) === 4;
   }
 
   private isIpv6(value: string): boolean {
-    // Must contain a colon but exclude hostname:port patterns (e.g., "example.com:8080")
-    // A valid IPv6 address contains at least two colons OR starts/ends with brackets
-    return (value.startsWith('[') && value.includes(']')) ||
-      (value.includes(':') && (value.split(':').length > 2 || value === '::'));
+    return isIP(value.replace(/^\[|\]$/g, '')) === 6;
   }
 
   private validateIpv4(ip: string): void {
@@ -304,51 +370,36 @@ export class SsrfDnsGuard {
       }
     }
 
-    // Check against private ranges
-    for (const range of PRIVATE_RANGES) {
-      if (((numeric & range.mask) >>> 0) === range.prefix) {
+    for (const range of BLOCKED_V4_LISTS) {
+      if (range.list.check(ip, 'ipv4')) {
         throw new SsrfBlockedError(ip, `Address in private range: ${range.label}`);
       }
     }
   }
 
   /**
-   * Validate IPv6 address against private/reserved ranges.
-   * OWASP SSRF: Block loopback, link-local, unique-local, and IPv4-mapped addresses.
+   * IPv6 is parsed into words, not matched as text: `[::ffff:127.0.0.1]` reaches
+   * the parser as `::ffff:7f00:1`, and NAT64 or 6to4 forms carry an IPv4 target.
    */
   private validateIpv6(ip: string): void {
-    const normalized = ip.replace(/^\[|\]$/g, '').toLowerCase();
-
-    // Loopback ::1
-    if (normalized === '::1' || normalized === '0000:0000:0000:0000:0000:0000:0000:0001') {
-      throw new SsrfBlockedError(ip, 'IPv6 loopback address (::1)');
+    const bare = ip.replace(/^\[|\]$/g, '').toLowerCase();
+    const words = ipv6Words(bare);
+    if (!words) {
+      throw new SsrfBlockedError(ip, 'Invalid IPv6 address');
     }
 
-    // Unspecified :: (like 0.0.0.0)
-    if (normalized === '::' || normalized === '0000:0000:0000:0000:0000:0000:0000:0000') {
-      throw new SsrfBlockedError(ip, 'IPv6 unspecified address (::)');
-    }
-
-    // Link-local fe80::/10
-    if (/^fe[89ab]/i.test(normalized)) {
-      throw new SsrfBlockedError(ip, 'IPv6 link-local address (fe80::/10)');
-    }
-
-    // Unique local fc00::/7 (includes fd00::/8)
-    if (/^f[cd]/i.test(normalized)) {
-      throw new SsrfBlockedError(ip, 'IPv6 unique-local address (fc00::/7)');
-    }
-
-    // IPv4-mapped ::ffff:x.x.x.x — validate the embedded IPv4
-    const v4MappedMatch = normalized.match(/^::ffff:(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})$/);
-    if (v4MappedMatch) {
-      this.validateIpv4(v4MappedMatch[1]);
+    const target = embeddedIpv4(words);
+    if (target) {
+      this.validateIpv4(target);
       return;
     }
 
-    // Multicast ff00::/8
-    if (normalized.startsWith('ff')) {
-      throw new SsrfBlockedError(ip, 'IPv6 multicast address (ff00::/8)');
+    const zone = bare.indexOf('%');
+    const address = zone >= 0 ? bare.slice(0, zone) : bare;
+    for (const range of BLOCKED_V6_LISTS) {
+      if (range.list.check(address, 'ipv6')) {
+        throw new SsrfBlockedError(ip, `IPv6 address in blocked range: ${range.label}`);
+      }
     }
   }
 

@@ -66,7 +66,27 @@ export function registerAIServices(): void {
 
     const selfLlmUrl = (config.SELF_LLM_URL || '').trim();
     const anthropicBaseUrl = (config.ANTHROPIC_BASE_URL || '').trim();
-    if (anthropicBaseUrl && config.NODE_ENV !== 'test') {
+    if (useMockAI && config.NODE_ENV !== 'test') {
+      // Skeleton mode stubs the agent loop's model too. Before, USE_MOCK_AI=true left
+      // IChatCompletionModel to ANTHROPIC_BASE_URL / SELF_LLM_URL / provider keys, so
+      // a "mock" run could call a real endpoint.
+      container.register(
+        DI_TOKENS.IChatCompletionModel,
+        () => ({
+          complete: async () => ({
+            message: { role: 'assistant' as const, content: 'This is a MOCK response from Skeleton Mode.' },
+            finishReason: 'stop' as const,
+            usage: { inputTokens: 0, outputTokens: 0 },
+            model: 'mock',
+          }),
+        }),
+        {
+          lifecycle: 'singleton',
+          tags: ['ai', 'chat', 'mock', 'skeleton'],
+          description: 'Mock chat completion model for Skeleton Mode',
+        },
+      );
+    } else if (anthropicBaseUrl && config.NODE_ENV !== 'test') {
       container.register(
         DI_TOKENS.IChatCompletionModel,
         () => new AnthropicChatModel({
@@ -104,7 +124,7 @@ export function registerAIServices(): void {
         () => new OpenAICompatibleChatModel({
           apiKey: config.OPENAI_API_KEY as string,
           baseURL: config.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-          model: 'gpt-4o-mini',
+          model: (process.env.OPENAI_MODEL ?? '').trim() || 'gpt-4o-mini',
         }),
         {
           lifecycle: 'singleton',
@@ -118,7 +138,7 @@ export function registerAIServices(): void {
         () => new AnthropicChatModel({
           apiKey: config.ANTHROPIC_API_KEY as string,
           baseURL: 'https://api.anthropic.com',
-          model: 'claude-sonnet-4-5',
+          model: (process.env.ANTHROPIC_MODEL ?? '').trim() || 'claude-sonnet-4-5',
         }),
         {
           lifecycle: 'singleton',

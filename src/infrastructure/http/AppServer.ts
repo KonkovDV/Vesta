@@ -14,6 +14,9 @@ import { routeParam } from '../../core/http/route-param';
 import { createMcpRoutes } from '../mcp/McpRoutes';
 import { McpStreamableTransport } from '../mcp/McpStreamableTransport';
 
+/** Agent id for tool policy on the MCP HTTP server: not taken from the request. */
+export const MCP_HTTP_AGENT_ID = 'mcp-http-client';
+
 type ExpressLikeApp = {
   use: (...args: Array<unknown>) => unknown;
   listen: (...args: Array<unknown>) => Server;
@@ -179,7 +182,9 @@ export class AppServer implements IHttpServer {
         resolveAccessContext: (req) => {
           const authenticatedRequest = req as { authContext?: { scopes?: string[] } };
           return {
-            agentId: routeParam(req.params?.clientName),
+            // The tool profile is chosen by agent id (researcher-* gets 'full'). The
+            // client names the URL segment, so it must not become the agent id.
+            agentId: MCP_HTTP_AGENT_ID,
             scopeLevel: authenticatedRequest.authContext ? 'user' : 'project',
             grantedScopes: authenticatedRequest.authContext?.scopes ?? [],
           };

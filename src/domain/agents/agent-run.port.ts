@@ -11,6 +11,8 @@ export interface AgentRunLimits {
   approvalTimeoutMs?: number;
   /** Compact the model prompt once usage is above this many tokens. */
   compactAfterTokens?: number;
+  /** First delay after a failed model call; doubles per failure, with jitter. Default 500 ms. */
+  modelRetryBaseMs?: number;
 }
 
 export interface AgentRunRequest {
@@ -25,6 +27,9 @@ export interface AgentRunRequest {
   agentId?: string;
   sessionId?: string;
   workspaceRoot?: string;
+  /** Authenticated principal that owns the run. Stored on AgentRunStarted. */
+  ownerId?: string;
+  tenantId?: string;
 }
 
 export interface AgentRunResult {

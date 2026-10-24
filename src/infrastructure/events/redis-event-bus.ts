@@ -28,7 +28,7 @@ import { getOrCreateCounter, getOrCreateHistogram } from '../../monitoring';
 import { getMetricsConfig } from '../../core/config/app-config';
 import { CorrelationIdProvider } from '../../core/correlation/correlation';
 import { IdGenerator } from '../../core/utils/IdGenerator';
-import { getConfig } from '../../config';
+import { getConfig, getRawEnv } from '../../config';
 import { safeJsonParse, tryJsonParse } from '../../core/utils/json';
 import type { IStructuredLogger } from '../../core/logging/IStructuredLogger';
 
@@ -345,16 +345,28 @@ export class RedisEventBus implements IEventBus {
     try {
       // Wrap Redis publish with abort signal support
       const publishPromise = this.redis.publish(channel, messageStr);
-      
+
+      let receivers: number;
       if (signal) {
+        let onAbort: (() => void) | undefined;
         const abortPromise = new Promise<never>((_, reject) => {
-          signal.addEventListener('abort', () => {
-            reject(new Error(`Publish aborted: ${signal.reason ?? 'Operation cancelled'}`));
-          }, { once: true });
+          onAbort = () => reject(new Error(`Publish aborted: ${signal.reason ?? 'Operation cancelled'}`));
+          signal.addEventListener('abort', onAbort, { once: true });
         });
-        await Promise.race([publishPromise, abortPromise]);
+        try {
+          receivers = await Promise.race([publishPromise, abortPromise]);
+        } finally {
+          // A long-lived signal would otherwise collect one listener per publish.
+          if (onAbort) signal.removeEventListener('abort', onAbort);
+        }
       } else {
-        await publishPromise;
+        receivers = await publishPromise;
+      }
+      // Pub/Sub keeps nothing: with no subscriber the message is gone. The outbox
+      // marks a row PUBLISHED when this call returns, so the strict mode turns
+      // "nobody listened" into a failure the outbox retries.
+      if (receivers === 0 && getRawEnv().EVENT_BUS_REQUIRE_SUBSCRIBER === 'true') {
+        throw new Error(`No subscriber on ${channel}`);
       }
       this.metrics.eventsPublished++;
       this.updateUptime();

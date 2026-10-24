@@ -85,11 +85,13 @@ export class PluginLoader {
   /**
    * Load all plugins from a directory
    */
-  async loadDirectory(directory: string): Promise<void> {
+  async loadDirectory(directory: string, only?: ReadonlySet<string>): Promise<void> {
     this.logger.info?.(`Scanning plugin directory: ${directory}`);
     try {
       const files = await fs.readdir(directory, { withFileTypes: true });
-      const dirs = files.filter((f: Dirent) => f.isDirectory() || f.isSymbolicLink());
+      const dirs = files
+        .filter((f: Dirent) => f.isDirectory() || f.isSymbolicLink())
+        .filter((f: Dirent) => !only || only.has(f.name));
 
       for (const dir of dirs) {
         const pluginPath = path.join(directory, dir.name);

@@ -35,9 +35,18 @@ export interface MigrationClient {
 export interface MigrationRunResult {
   succeeded: number;
   failed: number;
+  /** Files whose checksum is already in the ledger, plus empty files. */
   skipped: number;
+  /** Files not attempted because an earlier file failed (fail-fast). */
+  notRun: number;
   files: string[];
 }
+
+/**
+ * A DDL statement that waits for a lock blocks every query queued behind it.
+ * Each file gives up after this long instead; the run can be repeated.
+ */
+export const MIGRATION_LOCK_TIMEOUT = '10s';
 
 export function listMigrationFiles(dirs: readonly string[]): string[] {
   const files: string[] = [];
@@ -113,15 +122,22 @@ export async function runMigrations(input: {
   client: MigrationClient;
   dirs: readonly string[];
   log?: (line: string) => void;
+  /**
+   * Keep applying later files after one fails. Off by default: a later file
+   * usually depends on the earlier one, and a half-applied chain is harder to
+   * repair than a stopped one.
+   */
+  continueOnError?: boolean;
 }): Promise<MigrationRunResult> {
   const log = input.log ?? ((line: string) => process.stdout.write(`${line}\n`));
   const files = listMigrationFiles(input.dirs);
-  const result: MigrationRunResult = { succeeded: 0, failed: 0, skipped: 0, files };
+  const result: MigrationRunResult = { succeeded: 0, failed: 0, skipped: 0, notRun: 0, files };
 
   await input.client.connect();
   try {
     await input.client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_ID]);
     try {
+      await input.client.query(`SET lock_timeout = '${MIGRATION_LOCK_TIMEOUT}'`);
       await input.client.query(
         `CREATE TABLE IF NOT EXISTS ${MIGRATION_LEDGER} (
           filename text PRIMARY KEY,
@@ -137,7 +153,12 @@ export async function runMigrations(input: {
       }
 
       const seen = new Set<string>();
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
+        if (result.failed > 0 && input.continueOnError !== true) {
+          result.notRun = files.length - index;
+          log(`stopped: ${result.notRun} file(s) not run after a failure`);
+          break;
+        }
         const filename = path.basename(file);
         if (seen.has(filename)) {
           throw new Error(`Migration filename appears twice: ${filename}`);

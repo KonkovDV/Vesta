@@ -143,7 +143,11 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
                   user: env.OUTBOX_USER || env.EVENT_STORE_USER || database.user,
                   password: env.OUTBOX_PASSWORD || env.EVENT_STORE_PASSWORD || database.password,
                   database: env.OUTBOX_DATABASE || env.EVENT_STORE_DATABASE || database.database,
-                  ssl: env.OUTBOX_SSL === 'true' ? { rejectUnauthorized: false } : undefined,
+                  // TLS without certificate checks is open to a man in the middle. The
+                  // system CAs verify by default; DB_SSL_REJECT_UNAUTHORIZED=false opts out.
+                  ssl: env.OUTBOX_SSL === 'true'
+                    ? { rejectUnauthorized: env.DB_SSL_REJECT_UNAUTHORIZED !== 'false' }
+                    : undefined,
               },
               schema: env.OUTBOX_SCHEMA,
               outboxTable: env.OUTBOX_TABLE,
@@ -234,15 +238,22 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
   return result.data;
 }
 
+let cachedConfig: AppConfig | undefined;
+
 /**
- * Получить актуальную конфигурацию из текущего process.env.
+ * Validated configuration.
  *
- * Важно:
- * - Не кэширует результат: каждая интеракция читает актуальное состояние process.env.
- * - Это упрощает тесты, которые модифицируют process.env между вызовами bootstrap().
+ * One parse of process.env through the schema costs about 200 µs, and readStr /
+ * readInt / readBool call this on hot paths. The result is cached until
+ * reloadConfig(). Under NODE_ENV=test every call parses again, so a test that
+ * edits process.env between bootstrap() calls still sees its values.
  */
 export function getConfig(): AppConfig {
-  return loadConfigFromEnv(process.env);
+  if (process.env.NODE_ENV === 'test') {
+    return loadConfigFromEnv(process.env);
+  }
+  cachedConfig ??= loadConfigFromEnv(process.env);
+  return cachedConfig;
 }
 
 /**
@@ -257,11 +268,7 @@ export function getRawEnv(): NodeJS.ProcessEnv {
   return process.env;
 }
 
-/**
- * Re-read configuration from process.env.
- * Since getConfig() is already uncached, this is effectively a no-op
- * but exists for test symmetry (reset any transient state).
- */
+/** Drop the cached configuration. The next getConfig() parses process.env again. */
 export function reloadConfig(): void {
-  // getConfig() re-reads process.env each call — no cache to bust.
+  cachedConfig = undefined;
 }

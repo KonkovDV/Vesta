@@ -302,10 +302,14 @@ export function registerAgenticInterAgent(): void {
         toolPolicy = c.resolve<IToolExecutionPolicy>(DI_TOKENS.IToolExecutionPolicy);
       }
     } catch { /* graceful degradation */ }
+    const guard = c.isRegistered(DI_TOKENS.ISsrfDnsGuard)
+      ? c.resolve<SsrfDnsGuard>(DI_TOKENS.ISsrfDnsGuard)
+      : undefined;
     return new McpToolConsumerAdapter(
       c.resolve(DI_TOKENS.IStructuredLogger),
       c.resolve(DI_TOKENS.IConfigLoader),
       toolPolicy,
+      guard,
     );
   }, { lifecycle: 'singleton' });
 

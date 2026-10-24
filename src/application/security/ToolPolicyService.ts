@@ -4,12 +4,34 @@ import { ILogger } from '../../core/decorators/ILogger';
 import type { IToolPolicyResolver, ToolProfileId } from '../../domain/security/tool-policy-resolver.port';
 import { IToolExecutionPolicy, ToolExecutionRequest, ToolPolicyResult, GLOBAL_TOOL_DENY_LIST } from '../../domain/security/tool-execution-policy.interface';
 
+/**
+ * Canonical tool names (after aliasing) that need a person's approval by default:
+ * code execution, writes, outgoing messages, the browser, session control and
+ * automation. TOOL_APPROVAL_REQUIRED replaces the list (names or group:x, comma
+ * separated); an empty value turns approval off.
+ */
+export const DEFAULT_APPROVAL_REQUIRED = [
+  'exec', 'process', 'write', 'edit', 'apply_patch',
+  'group:messaging', 'send_message', 'sessions_send', 'sessions_spawn',
+  'browser', 'web-browser.navigate', 'web-browser.screenshot',
+  'fs_write_file', 'group:automation',
+];
+
 @injectable()
 export class ToolPolicyService implements IToolExecutionPolicy {
+  /** Policies added by kernel extensions. They can deny or require approval, never allow more. */
+  private readonly constraints: IToolExecutionPolicy[] = [];
+
   constructor(
     @inject('ILogger') private readonly logger: ILogger,
-    @inject('IToolPolicyResolver') private readonly policyResolver: IToolPolicyResolver
+    @inject('IToolPolicyResolver') private readonly policyResolver: IToolPolicyResolver,
+    private readonly approvalRequired: readonly string[] = approvalListFromEnv(),
   ) {}
+
+  /** Tighten-only: the result is the strictest of the kernel decision and every constraint. */
+  addConstraint(policy: IToolExecutionPolicy): void {
+    this.constraints.push(policy);
+  }
 
   /**
    * Evaluate whether the tool execution is allowed.
@@ -38,8 +60,22 @@ export class ToolPolicyService implements IToolExecutionPolicy {
       };
     }
 
+    let requiresApproval = this.needsApproval(toolName);
+    let approvalReason = requiresApproval ? `Tool '${toolName}' has effects outside the conversation` : undefined;
+    for (const constraint of this.constraints) {
+      const extra = await constraint.evaluate(request);
+      if (!extra.allowed) {
+        this.logger.warn('tool_policy_decision', { decision: 'deny', source: 'extension', toolName, agentId: effectiveAgentId });
+        return { allowed: false, reason: extra.reason ?? 'denied by an extension policy', violationCode: extra.violationCode ?? 'DENIED_BY_EXTENSION' };
+      }
+      if (extra.requiresApproval) {
+        requiresApproval = true;
+        approvalReason = extra.approvalReason ?? approvalReason ?? 'required by an extension policy';
+      }
+    }
+
     this.logger.info('tool_policy_decision', {
-      decision: 'allow',
+      decision: requiresApproval ? 'ask' : 'allow',
       toolName,
       agentId: effectiveAgentId,
       userId: request.userId,
@@ -47,7 +83,14 @@ export class ToolPolicyService implements IToolExecutionPolicy {
       traceId: request.traceId,
     });
 
-    return { allowed: true };
+    return requiresApproval ? { allowed: true, requiresApproval: true, approvalReason } : { allowed: true };
+  }
+
+  private needsApproval(toolName: string): boolean {
+    const raw = toolName.trim().toLowerCase();
+    const canonical = this.policyResolver.normalizeToolName(toolName);
+    const listed = new Set(this.policyResolver.expandToolGroups([...this.approvalRequired]));
+    return listed.has(raw) || listed.has(canonical);
   }
 
   /**
@@ -57,20 +100,19 @@ export class ToolPolicyService implements IToolExecutionPolicy {
   canExecute(agentId: string, toolName: string): boolean {
     const normalizedName = this.policyResolver.normalizeToolName(toolName);
 
-    // 1. Global Blocklist (Safety First)
-    if (this.isGloballyBlocked(normalizedName)) {
+    // 1. Global Blocklist (Safety First). Checked on the name as called: bash and
+    // python alias to the canonical 'exec', and the canonical name collided with the
+    // literal 'exec' entry, so the contained shell tools were always denied.
+    if (this.isGloballyBlocked(toolName.trim().toLowerCase())) {
       this.logger.warn(`ToolPolicy: Blocked global forbidden tool '${normalizedName}' for '${agentId}'`);
       return false;
     }
 
     // 2. Role-Based Access Control (RBAC)
     // Map agent roles to Tool Profiles
+    // An agent id without a registered role gets 'minimal' (session_status only).
+    // The id is a label set by server code; callers must not let a client choose it.
     const profile = this.getProfileForAgent(agentId);
-    if (!profile) {
-      // Default deny if no profile matched
-      this.logger.warn(`ToolPolicy: No profile found for agent '${agentId}', denying '${normalizedName}'`);
-      return false;
-    }
 
     const policy = this.policyResolver.resolveToolProfilePolicy(profile);
     if (!policy) {
@@ -127,4 +169,10 @@ export class ToolPolicyService implements IToolExecutionPolicy {
     }
     return 'minimal';
   }
+}
+
+function approvalListFromEnv(): string[] {
+  const raw = process.env.TOOL_APPROVAL_REQUIRED;
+  if (raw === undefined) return [...DEFAULT_APPROVAL_REQUIRED];
+  return raw.split(',').map((name) => name.trim().toLowerCase()).filter((name) => name.length > 0);
 }
