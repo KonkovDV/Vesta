@@ -17,8 +17,10 @@ import {
   PublishResult,
   OutboxStatus,
   OutboxError,
-  OutboxUtils
+  OutboxUtils,
+  type OutboxSaveOptions,
 } from '../../domain/events/outbox.interface';
+import { ConcurrencyError } from '../../domain/errors/DomainError';
 import { DomainEvent } from '../../domain/events/event-store.interface';
 import { IEventBus } from '../../domain/events/event-bus.interface';
 import { getOrCreateCounter, getOrCreateHistogram } from '../../monitoring';
@@ -527,7 +529,11 @@ export class PostgreSQLOutbox implements IOutbox {
   /**
    * Сохранить события в Event Store и создать outbox сообщения (одна транзакция)
    */
-  async saveEventsWithOutbox(events: DomainEvent[], transactionId?: string): Promise<OutboxMessage[]> {
+  async saveEventsWithOutbox(
+    events: DomainEvent[],
+    transactionId?: string,
+    options?: OutboxSaveOptions,
+  ): Promise<OutboxMessage[]> {
     if (!events || events.length === 0) return [];
 
     const client = await this.pool.connect();
@@ -536,7 +542,7 @@ export class PostgreSQLOutbox implements IOutbox {
       await client.query('BEGIN');
 
       // Вычисление версий агрегатов в рамках ТХ, кешируем для минимизации SELECT
-      const outboxMessages = await this.insertEventsAndOutboxBatch(client, events, transactionId);
+      const outboxMessages = await this.insertEventsAndOutboxBatch(client, events, transactionId, options);
 
       await client.query('COMMIT');
 
@@ -544,6 +550,10 @@ export class PostgreSQLOutbox implements IOutbox {
       return outboxMessages;
     } catch (error) {
       await client.query('ROLLBACK');
+      if (error instanceof ConcurrencyError) {
+        // The caller decided on a version that is no longer current: it must reload.
+        throw error;
+      }
       this.logger?.error('❌ Failed to save events with transactional outbox:', { error: String(error) });
       throw OutboxError.publishFailed('saveEventsWithOutbox', error as Error);
     } finally {
@@ -558,11 +568,12 @@ export class PostgreSQLOutbox implements IOutbox {
   async saveEventsWithOutboxInTxClient(
     client: PoolClient,
     events: DomainEvent[],
-    transactionId?: string
+    transactionId?: string,
+    options?: OutboxSaveOptions,
   ): Promise<OutboxMessage[]> {
     if (!events || events.length === 0) return [];
 
-    return this.insertEventsAndOutboxBatch(client, events, transactionId);
+    return this.insertEventsAndOutboxBatch(client, events, transactionId, options);
   }
 
   /**
@@ -1241,13 +1252,34 @@ export class PostgreSQLOutbox implements IOutbox {
     client: PoolClient,
     events: DomainEvent[],
     transactionId?: string,
+    options?: OutboxSaveOptions,
   ): Promise<OutboxMessage[]> {
     const maxAttempts = 5;
     const versionCache = new Map<string, number>();
+    const expected = options?.expectedAggregateVersion;
+    if (expected !== undefined && new Set(events.map((event) => event.aggregateId)).size !== 1) {
+      throw new Error('expectedAggregateVersion needs events of exactly one aggregate');
+    }
 
     const attemptWrite = async (attempt: number): Promise<OutboxMessage[]> => {
       await client.query('SAVEPOINT outbox_batch');
       try {
+        if (expected !== undefined) {
+          // Lock the head row so concurrent writers queue here; the unique key catches
+          // a writer that raced in after the head we read (or onto an empty stream).
+          const current = await client.query(
+            `SELECT aggregate_version AS v FROM ${this.eventStoreSchema}.${this.eventStoreEventsTable}
+              WHERE aggregate_id = $1 ORDER BY aggregate_version DESC LIMIT 1 FOR UPDATE`,
+            [events[0].aggregateId],
+          );
+          const actual = Number(current.rows[0]?.v ?? 0);
+          if (actual !== expected) {
+            throw new ConcurrencyError(
+              `Aggregate ${events[0].aggregateId} version conflict: expected ${expected}, actual ${actual}`,
+              { metadata: { aggregateId: events[0].aggregateId, expectedVersion: expected, actualVersion: actual } },
+            );
+          }
+        }
         const prepared = await events.reduce<Promise<Array<{ event: DomainEvent; version: number }>>>(
           async (previous, event) => {
             const rows = await previous;
@@ -1331,6 +1363,16 @@ export class PostgreSQLOutbox implements IOutbox {
           // The transaction may already be finished.
         }
         const pgError = error as { code?: string };
+        if (error instanceof ConcurrencyError) {
+          throw error;
+        }
+        if (pgError?.code === '23505' && expected !== undefined) {
+          // Re-numbering after a concurrent write would commit a decision made on old state.
+          throw new ConcurrencyError(
+            `Aggregate ${events[0].aggregateId} version conflict: another writer appended`,
+            { metadata: { aggregateId: events[0].aggregateId, expectedVersion: expected } },
+          );
+        }
         if (pgError?.code === '23505' && attempt < maxAttempts - 1) {
           events.forEach((event) => versionCache.delete(event.aggregateId));
           const delay = 10 * Math.pow(2, attempt);

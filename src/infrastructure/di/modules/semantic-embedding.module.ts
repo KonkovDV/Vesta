@@ -14,6 +14,7 @@ import { EventVectorizerAdapter } from '../../memory/embedding/EventVectorizerAd
 import { SemanticEmbeddingWorker } from '../../../application/workers/SemanticEmbeddingWorker';
 import type { IEventStore } from '../../../domain/events/event-store.interface';
 import type { IEventVectorizer } from '../../../domain/memory/IEventVectorizer';
+import { isConsumerCursorStore } from '../../../domain/events/commit-order.port';
 
 /**
  * Initialize and start the SemanticEmbeddingWorker background process.
@@ -49,16 +50,20 @@ export function registerSemanticEmbeddingModule(): void {
 
   container.register(
     'SemanticEmbeddingWorker',
-    (c) => new SemanticEmbeddingWorker(
-      c.resolve<IEventStore>(DI_TOKENS.IEventStore),
-      c.resolve<IEventVectorizer>(DI_TOKENS.IEventVectorizer),
-      {
-        batchSize: Number(process.env.EMBEDDING_BATCH_SIZE ?? 20),
-        pollIntervalMs: Number(process.env.EMBEDDING_WORKER_INTERVAL_MS ?? 5000),
-        enabled: process.env.SEMANTIC_SEARCH_ENABLED === 'true',
-      },
-      console,
-    ),
+    (c) => {
+      const eventStore = c.resolve<IEventStore>(DI_TOKENS.IEventStore);
+      return new SemanticEmbeddingWorker(
+        eventStore,
+        c.resolve<IEventVectorizer>(DI_TOKENS.IEventVectorizer),
+        {
+          batchSize: Number(process.env.EMBEDDING_BATCH_SIZE ?? 20),
+          pollIntervalMs: Number(process.env.EMBEDDING_WORKER_INTERVAL_MS ?? 5000),
+          enabled: process.env.SEMANTIC_SEARCH_ENABLED === 'true',
+        },
+        console,
+        isConsumerCursorStore(eventStore) ? eventStore : undefined,
+      );
+    },
     { lifecycle: 'singleton', tags: ['semantic', 'worker', 'background'] },
   );
 }

@@ -64,6 +64,10 @@ test('two executors on PostgreSQL run an approved side effect once', { skip: !ba
       assert.equal(result.value.reason, 'completed');
     }
   }
+  // One writer per stream: the loser neither calls the model again nor finishes twice.
+  const events = await storeA.getEvents('agent-run-pg-run-1');
+  assert.equal(events.filter((event) => event.type === 'ModelCalled').length, 2);
+  assert.equal(events.filter((event) => event.type === 'AgentRunFinished').length, 1);
   await (storeA as unknown as { close(): Promise<void> }).close();
   await (storeB as unknown as { close(): Promise<void> }).close();
 });

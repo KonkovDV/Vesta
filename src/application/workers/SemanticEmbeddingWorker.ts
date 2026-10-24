@@ -2,9 +2,15 @@
  * SemanticEmbeddingWorker — Background consumer for event vectorization.
  * Layer: Application (Workers)
  *
- * Reads un-vectorized events from the event store in batches,
- * generates embeddings via IEventVectorizer, and writes them back.
- * Runs as a non-blocking background loop that never blocks saveEvents().
+ * Reads events from the event store in batches, generates embeddings via
+ * IEventVectorizer, and writes them back. Runs as a non-blocking background loop
+ * that never blocks saveEvents().
+ *
+ * When the store reads in commit order (ICommitOrderReader), the worker follows a
+ * (tx_id, gsn) cursor and keeps it in IConsumerCursorStore after each written
+ * batch, so it neither skips an event that committed late (MP-K23) nor starts
+ * over after a restart. A store without that reader falls back to a gsn cursor
+ * held in memory, which can skip such an event.
  *
  * @since v2.9.0 — Этап 6 (Semantic Event Sourcing)
  * @see PLANS/05_NEXT_PHASES/PROMPT_PHASE_4_SEMANTIC.md
@@ -12,6 +18,11 @@
 
 import type { IEventStore, DomainEvent } from '../../domain/events/event-store.interface';
 import type { IEventVectorizer, EventEmbeddingUpdate } from '../../domain/memory/IEventVectorizer';
+import {
+  isCommitOrderReader,
+  type CommitCursor,
+  type IConsumerCursorStore,
+} from '../../domain/events/commit-order.port';
 
 export interface SemanticEmbeddingWorkerOptions {
   /** Batch size for vectorization (default: 20) */
@@ -20,6 +31,8 @@ export interface SemanticEmbeddingWorkerOptions {
   readonly pollIntervalMs: number;
   /** Feature flag — if false, worker does not start */
   readonly enabled: boolean;
+  /** Name under which the cursor is stored (default: semantic-embedding) */
+  readonly consumerName?: string;
 }
 
 /** Minimal logger interface (subset of IStructuredLogger). */
@@ -39,19 +52,16 @@ export class SemanticEmbeddingWorker {
   private timer: ReturnType<typeof setInterval> | null = null;
   private processing = false;
   private lastProcessedGsn: number | null = null;
+  private cursor: CommitCursor | null = null;
+  private cursorLoaded = false;
   private _stopped = false;
-
-  // TODO(Этап 6.1): Persist lastProcessedGsn across restarts (e.g. via config table
-  // or dedicated cursor store). Currently resets to null on restart, causing
-  // re-vectorization of events that already have embeddings. Not harmful
-  // (idempotent) but wastes compute. Also consider filtering by
-  // `semantic_embedding IS NULL` in getEventsByGsnRange for efficiency.
 
   constructor(
     private readonly eventStore: IEventStore,
     private readonly vectorizer: IEventVectorizer,
     private readonly options: SemanticEmbeddingWorkerOptions,
     private readonly logger: WorkerLogger,
+    private readonly cursorStore?: IConsumerCursorStore,
   ) {}
 
   /**
@@ -79,6 +89,8 @@ export class SemanticEmbeddingWorker {
     this.logger.info('[SemanticEmbeddingWorker] Started', {
       batchSize: opts.batchSize,
       pollIntervalMs: opts.pollIntervalMs,
+      reader: isCommitOrderReader(this.eventStore) ? 'commit-order' : 'gsn',
+      durableCursor: this.cursorStore !== undefined,
     });
   }
 
@@ -106,10 +118,7 @@ export class SemanticEmbeddingWorker {
 
     try {
       const opts = this.getOptions();
-      const events = await this.eventStore.getEventsByGsnRange(
-        this.lastProcessedGsn,
-        opts.batchSize,
-      );
+      const { events, next } = await this.readBatch(opts.batchSize);
 
       if (events.length === 0) return 0;
 
@@ -125,17 +134,23 @@ export class SemanticEmbeddingWorker {
 
       await this.eventStore.updateEventEmbeddings(updates);
 
-      // Track last processed GSN for incremental polling
-      const lastEvent = events[events.length - 1];
-      if (lastEvent.gsn !== undefined) {
-        this.lastProcessedGsn = lastEvent.gsn;
+      // Advance only after the embeddings are written: a crash in between repeats
+      // the batch, which is harmless because the update is idempotent.
+      if (next !== undefined) {
+        if (next) await this.cursorStore?.saveConsumerCursor(this.consumerName, next);
+        this.cursor = next;
+      } else {
+        const lastEvent = events[events.length - 1];
+        if (lastEvent.gsn !== undefined) {
+          this.lastProcessedGsn = lastEvent.gsn;
+        }
       }
 
       this.logger.info('[SemanticEmbeddingWorker] Batch vectorized', {
         batchSize: events.length,
         durationMs,
         dimension: this.vectorizer.dimensions,
-        lastGsn: this.lastProcessedGsn,
+        ...(next !== undefined ? { cursor: this.cursor } : { lastGsn: this.lastProcessedGsn }),
       });
 
       return events.length;
@@ -147,6 +162,23 @@ export class SemanticEmbeddingWorker {
     } finally {
       this.processing = false;
     }
+  }
+
+  /** `next` is undefined when the store has no commit-order reader. */
+  private async readBatch(limit: number): Promise<{ events: DomainEvent[]; next?: CommitCursor | null }> {
+    if (!isCommitOrderReader(this.eventStore)) {
+      return { events: await this.eventStore.getEventsByGsnRange(this.lastProcessedGsn, limit) };
+    }
+    if (!this.cursorLoaded) {
+      this.cursor = (await this.cursorStore?.loadConsumerCursor(this.consumerName)) ?? null;
+      this.cursorLoaded = true;
+    }
+    const page = await this.eventStore.getCommittedEventsAfter(this.cursor, limit);
+    return { events: page.events, next: page.cursor };
+  }
+
+  private get consumerName(): string {
+    return this.options.consumerName ?? 'semantic-embedding';
   }
 
   /**

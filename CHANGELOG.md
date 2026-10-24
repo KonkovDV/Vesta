@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.11.0
+
+- One executor writes a run at a time. A second resume that loses the stream version stops with `AgentRunConflictError`, or returns the result when the first executor already finished. `ToolCallStarted` carries a lease, so a live body is not journaled as `outcome_unknown`. MP-K39. `tests/unit/agent-run-service.test.ts`, `tests/integration/agent-run-postgres.test.ts`.
+- `saveEventsWithOutbox` accepts `expectedAggregateVersion` and throws `ConcurrencyError` instead of renumbering. Callers that omit the version still renumber. MP-K40. `tests/integration/outbox-delivery.test.ts`.
+- `SemanticEmbeddingWorker` reads in commit order and stores its cursor in `event_store.consumer_cursors` (`004_consumer_cursors.sql`). MP-K23. `tests/unit/semantic-embedding-worker.test.ts`.
+- Sales, HR, healthcare, and ingest require a scope. MRI review and finalize also require `healthcare.review`. Keys from `BFF_API_KEY` and `BFF_API_KEYS_CSV` have no scopes. MP-K32. `tests/unit/product-route-scopes.test.ts`.
+- C3 names the outbox poll and the hourly memory purge. Those are not a cron wake-up.
+
 ## 2.10.0
 
 Hardening cut. Each line names the check that backs it; `npm test` and `npm run test:integration` are part of this repository now.

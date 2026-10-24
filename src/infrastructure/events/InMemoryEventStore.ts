@@ -9,13 +9,20 @@ import {
 } from '../../domain/events/event-store.interface';
 import type { SemanticEventResult, EventEmbeddingUpdate } from '../../domain/memory/IEventVectorizer';
 import { applyEventUpcastersToArray } from '../../domain/events/event-upcaster-registry';
+import type {
+  CommitCursor,
+  CommittedEventsPage,
+  ICommitOrderReader,
+  IConsumerCursorStore,
+} from '../../domain/events/commit-order.port';
 
 /**
  * In-Memory Event Store implementation for testing.
  */
-export class InMemoryEventStore implements IEventStore {
+export class InMemoryEventStore implements IEventStore, ICommitOrderReader, IConsumerCursorStore {
   private events: DomainEvent[] = [];
   private snapshots: Map<string, Snapshot> = new Map();
+  private cursors = new Map<string, CommitCursor>();
   private nextGsn = 1;
 
   async saveEvents(events: DomainEvent[], options?: SaveEventsOptions): Promise<SaveEventsResult> {
@@ -111,6 +118,27 @@ export class InMemoryEventStore implements IEventStore {
     return applyEventUpcastersToArray(filtered);
   }
 
+  /** Writes here never interleave, so gsn order is commit order. */
+  async getCommittedEventsAfter(cursor: CommitCursor | null, limit = 500): Promise<CommittedEventsPage> {
+    const events = await this.getEventsByGsnRange(cursor?.gsn ?? null, limit);
+    const last = events.at(-1);
+    return {
+      events,
+      cursor: typeof last?.gsn === 'number' ? { txId: '0', gsn: last.gsn } : cursor,
+    };
+  }
+
+  async loadConsumerCursor(consumer: string): Promise<CommitCursor | null> {
+    return this.cursors.get(consumer) ?? null;
+  }
+
+  async saveConsumerCursor(consumer: string, cursor: CommitCursor): Promise<void> {
+    const current = this.cursors.get(consumer);
+    if (!current || current.gsn < cursor.gsn) {
+      this.cursors.set(consumer, { ...cursor });
+    }
+  }
+
   async getLatestGsn(): Promise<number | null> {
     const gsns = this.events
       .map((e) => e.gsn)
@@ -186,6 +214,7 @@ export class InMemoryEventStore implements IEventStore {
   async close(): Promise<void> {
     this.events = [];
     this.snapshots.clear();
+    this.cursors.clear();
     this.nextGsn = 1;
   }
 

@@ -125,15 +125,27 @@ export interface PublishResult {
  * - Dead Letter Queue для проблемных сообщений
  * - Мониторинг и статистику
  */
+export interface OutboxSaveOptions {
+  /** All events belong to one aggregate whose stored version must equal this. */
+  expectedAggregateVersion?: number;
+}
+
 export interface IOutbox {
   /**
    * Сохранить события в Event Store и создать outbox сообщения (в одной транзакции)
    *
    * @param events - Доменные события для сохранения
    * @param transactionId - ID транзакции для группировки
+   * @param options.expectedAggregateVersion - Version of the single aggregate the caller
+   *   decided on. A different stored version throws ConcurrencyError; without it the
+   *   events are appended after whatever version is stored.
    * @returns Promise<OutboxMessage[]> - Созданные outbox сообщения
    */
-  saveEventsWithOutbox(events: DomainEvent[], transactionId?: string): Promise<OutboxMessage[]>;
+  saveEventsWithOutbox(
+    events: DomainEvent[],
+    transactionId?: string,
+    options?: OutboxSaveOptions,
+  ): Promise<OutboxMessage[]>;
 
   /**
    * Обработать все pending сообщения из outbox

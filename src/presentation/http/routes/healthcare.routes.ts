@@ -1,10 +1,18 @@
 import type { Request, Response, NextFunction, IRouter } from 'express-serve-static-core';
 const express = require('express');
 import { container } from '../../../core/di/container';
+import { requireScope } from '../../../application/middleware/auth';
 import type { DiagnosisSupportController } from '../controllers/healthcare/DiagnosisSupportController';
 import type { GenerateMriSecondOpinionController } from '../controllers/healthcare/GenerateMriSecondOpinionController';
 import type { CompleteMriHumanReviewController } from '../controllers/healthcare/CompleteMriHumanReviewController';
 import type { FinalizeMriSecondOpinionController } from '../controllers/healthcare/FinalizeMriSecondOpinionController';
+
+/**
+ * Recording a human review or finalizing it needs this scope as well, so the key that
+ * asked for the AI opinion cannot also sign it off. The disposition's `reviewerRole`
+ * is still whatever the caller sends.
+ */
+export const HEALTHCARE_REVIEW_SCOPE = 'healthcare.review';
 
 export function createHealthcareRoutes(): IRouter {
   const router = express.Router();
@@ -19,12 +27,12 @@ export function createHealthcareRoutes(): IRouter {
     controller.handle(req, res).catch(next);
   });
 
-  router.post('/mri-second-opinion/:caseId/review', (req: Request, res: Response, next: NextFunction) => {
+  router.post('/mri-second-opinion/:caseId/review', requireScope(HEALTHCARE_REVIEW_SCOPE), (req: Request, res: Response, next: NextFunction) => {
     const controller = container.resolve<CompleteMriHumanReviewController>('CompleteMriHumanReviewController');
     controller.handle(req, res).catch(next);
   });
 
-  router.post('/mri-second-opinion/:caseId/finalize', (req: Request, res: Response, next: NextFunction) => {
+  router.post('/mri-second-opinion/:caseId/finalize', requireScope(HEALTHCARE_REVIEW_SCOPE), (req: Request, res: Response, next: NextFunction) => {
     const controller = container.resolve<FinalizeMriSecondOpinionController>('FinalizeMriSecondOpinionController');
     controller.handle(req, res).catch(next);
   });

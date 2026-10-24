@@ -142,3 +142,25 @@ test('with the DLQ disabled a poisoned lease ends FAILED and is not claimed agai
   assert.equal(row.status, 'FAILED');
   assert.ok(row.retry_count >= 3, 'retries are used up, so no claim selects it');
 });
+
+test('a write that names its expected version fails instead of re-numbering after a concurrent write', { skip: !baseUrl }, async () => {
+  const { EventFactory } = await import('../../src/domain/events/event-store.interface');
+  const { ConcurrencyError } = await import('../../src/domain/errors/DomainError');
+  const box = outbox({ async publish() {} });
+  const event = (n: number) => EventFactory.createBaseEvent('agg-occ', 'Probe', { n }, 'corr_outbox_occ_1');
+  await box.saveEventsWithOutbox([event(1)], undefined, { expectedAggregateVersion: 0 });
+  // Two writers both decided on version 1.
+  const results = await Promise.allSettled([
+    box.saveEventsWithOutbox([event(2)], undefined, { expectedAggregateVersion: 1 }),
+    box.saveEventsWithOutbox([event(3)], undefined, { expectedAggregateVersion: 1 }),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  const rejected = results.find((result) => result.status === 'rejected') as PromiseRejectedResult;
+  assert.ok(rejected.reason instanceof ConcurrencyError, String(rejected.reason));
+  await assert.rejects(box.saveEventsWithOutbox([event(4)], undefined, { expectedAggregateVersion: 5 }), ConcurrencyError);
+  // Without a version the old behaviour stays: append after whatever is stored.
+  await box.saveEventsWithOutbox([event(5)]);
+  await box.close();
+  const rows = await query<{ v: number }>(`SELECT aggregate_version AS v FROM event_store.events WHERE aggregate_id = 'agg-occ' ORDER BY 1`);
+  assert.deepEqual(rows.map((row) => Number(row.v)), [1, 2, 3]);
+});

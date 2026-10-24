@@ -30,11 +30,14 @@ import { tryJsonParse } from '../../core/utils/json';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
 import type { IStructuredLogger } from '../../core/logging/IStructuredLogger';
 
-/** Position in commit order: the writing transaction and the event's gsn inside it. */
-export interface CommitCursor {
-  txId: string;
-  gsn: number;
-}
+import type {
+  CommitCursor,
+  CommittedEventsPage,
+  ICommitOrderReader,
+  IConsumerCursorStore,
+} from '../../domain/events/commit-order.port';
+
+export type { CommitCursor } from '../../domain/events/commit-order.port';
 
 interface PostgresEventStoreConfig {
   connection: PoolConfig;
@@ -161,7 +164,7 @@ const EVENT_STORE_MODE_STATE_VALUES: Record<EventStoreWritePrimaryMode, number> 
   events_v2_only: 3,
 };
 
-export class PostgresEventStore implements IEventStore {
+export class PostgresEventStore implements IEventStore, ICommitOrderReader, IConsumerCursorStore {
   private readonly pool: Pool;
   private readonly onPoolError: (err: Error) => void;
   private readonly schema: string;
@@ -169,6 +172,7 @@ export class PostgresEventStore implements IEventStore {
   private readonly snapshotsTable: string;
   private readonly qualifiedEventsTable: string;
   private readonly qualifiedSnapshotsTable: string;
+  private readonly qualifiedCursorsTable: string;
   /**
    * R2.2 partitioning POC controls (C2 dual-write).
    * When disabled, `pocEventsTable`/`qualifiedPocEventsTable` are unused.
@@ -227,6 +231,11 @@ export class PostgresEventStore implements IEventStore {
       this.schema,
       this.snapshotsTable,
       'PostgresEventStore.snapshots',
+    );
+    this.qualifiedCursorsTable = qualifyIdentifier(
+      this.schema,
+      'consumer_cursors',
+      'PostgresEventStore.consumerCursors',
     );
 
     // R2.2-C2: evaluate partitioning POC settings once per instance based on process-level flags.
@@ -909,10 +918,7 @@ export class PostgresEventStore implements IEventStore {
    * commit. Unlike a gsn range this does not skip an event whose transaction drew
    * a lower gsn and committed later (MP-K23). Needs migration 003. Canonical table only.
    */
-  async getCommittedEventsAfter(
-    cursor: CommitCursor | null,
-    limit = 500,
-  ): Promise<{ events: Array<DomainEvent & { gsn?: number }>; cursor: CommitCursor | null }> {
+  async getCommittedEventsAfter(cursor: CommitCursor | null, limit = 500): Promise<CommittedEventsPage> {
     const res = await this.pool.query(
       `SELECT ${EVENT_READ_COLUMNS}, tx_id::text AS tx_id
          FROM ${this.qualifiedEventsTable}
@@ -928,6 +934,27 @@ export class PostgresEventStore implements IEventStore {
       events,
       cursor: last ? { txId: String(last.tx_id), gsn: Number(last.gsn) } : cursor,
     };
+  }
+
+  /** Needs migration 004. */
+  async loadConsumerCursor(consumer: string): Promise<CommitCursor | null> {
+    const res = await this.pool.query(
+      `SELECT tx_id::text AS tx_id, gsn FROM ${this.qualifiedCursorsTable} WHERE consumer = $1`,
+      [consumer],
+    );
+    const row = res.rows[0] as { tx_id: string; gsn: string | number } | undefined;
+    return row ? { txId: row.tx_id, gsn: Number(row.gsn) } : null;
+  }
+
+  /** Moves the cursor forward only; an older position is ignored. Needs migration 004. */
+  async saveConsumerCursor(consumer: string, cursor: CommitCursor): Promise<void> {
+    await this.pool.query(
+      `INSERT INTO ${this.qualifiedCursorsTable} AS c (consumer, tx_id, gsn)
+       VALUES ($1, $2::xid8, $3::bigint)
+       ON CONFLICT (consumer) DO UPDATE SET tx_id = EXCLUDED.tx_id, gsn = EXCLUDED.gsn, updated_at = now()
+        WHERE (c.tx_id, c.gsn) < (EXCLUDED.tx_id, EXCLUDED.gsn)`,
+      [consumer, cursor.txId, cursor.gsn],
+    );
   }
 
   async getLatestGsn(): Promise<number | null> {

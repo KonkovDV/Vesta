@@ -7,6 +7,8 @@ import assert from 'node:assert/strict';
 import { Client } from 'pg';
 import { createPostgreSQLEventStore, type CommitCursor } from '../../src/infrastructure/events/postgres-event-store';
 import { CORE_MIGRATIONS_DIR, runMigrations } from '../../src/infrastructure/database/migration-runner';
+import { SemanticEmbeddingWorker } from '../../src/application/workers/SemanticEmbeddingWorker';
+import type { IEventVectorizer } from '../../src/domain/memory/IEventVectorizer';
 
 const baseUrl = process.env.TEST_DATABASE_URL;
 const dbName = `mp_commit_${process.pid}_${Date.now()}`;
@@ -62,6 +64,58 @@ test('an event committed after a later gsn is still delivered in commit order', 
     assert.deepEqual(delivered.sort(), ['fast-writer', 'slow-writer']);
   } finally {
     await Promise.all([early.end(), late.end()]);
+    await store.close();
+  }
+});
+
+test('the embedding worker vectorizes a late commit and resumes from its stored cursor', { skip: !baseUrl }, async () => {
+  const store = createPostgreSQLEventStore({ connection: { connectionString: url } });
+  const seen: string[] = [];
+  const vectorizer = {
+    isReady: true,
+    dimensions: 384,
+    initialize: async () => undefined,
+    vectorizeBatch: async (texts: string[]) => {
+      seen.push(...texts);
+      return texts.map(() => Array.from({ length: 384 }, (_, i) => (i === 0 ? 1 : 0)));
+    },
+  } as unknown as IEventVectorizer;
+  const options = { batchSize: 50, pollIntervalMs: 60_000, enabled: true, consumerName: 'embedding-probe' };
+  const quiet = { info: () => undefined, error: () => undefined };
+  const early = new Client({ connectionString: url });
+  const late = new Client({ connectionString: url });
+  const check = new Client({ connectionString: url });
+  await Promise.all([early.connect(), late.connect(), check.connect()]);
+  try {
+    await check.query('UPDATE event_store.events SET semantic_embedding = NULL');
+    const before = Number((await check.query('SELECT count(*) AS n FROM event_store.events')).rows[0].n);
+
+    await early.query('BEGIN');
+    await insert(early, 'embed-slow');
+    await late.query('BEGIN');
+    await insert(late, 'embed-fast');
+    await late.query('COMMIT');
+
+    const worker = new SemanticEmbeddingWorker(store, vectorizer, options, quiet, store);
+    await worker.tick();
+    await early.query('COMMIT');
+    await worker.tick();
+
+    const missing = await check.query(
+      `SELECT event_id FROM event_store.events WHERE semantic_embedding IS NULL ORDER BY event_id`,
+    );
+    assert.deepEqual(missing.rows, [], 'every committed event has an embedding');
+    assert.equal(seen.length, before + 2);
+
+    const restarted = new SemanticEmbeddingWorker(store, vectorizer, options, quiet, store);
+    assert.equal(await restarted.tick(), 0, 'a restart does not read the journal again');
+
+    const stored = await store.loadConsumerCursor('embedding-probe');
+    assert.ok(stored);
+    await store.saveConsumerCursor('embedding-probe', { txId: '1', gsn: 1 });
+    assert.deepEqual(await store.loadConsumerCursor('embedding-probe'), stored, 'an older cursor is ignored');
+  } finally {
+    await Promise.all([early.end(), late.end(), check.end()]);
     await store.close();
   }
 });

@@ -59,6 +59,10 @@ export const ToolCallStartedSchema = z.object({
   ...agentRunBase,
   toolCallId: z.string().min(1),
   name: z.string().min(1),
+  /** The execution that holds the claim. */
+  executorId: z.string().min(1).optional(),
+  /** Until then a resume elsewhere treats the call as running, not as unknown. */
+  leaseExpiresAt: z.string().datetime().optional(),
 });
 
 export const ToolCallCompletedSchema = z.object({

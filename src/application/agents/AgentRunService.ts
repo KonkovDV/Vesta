@@ -22,7 +22,7 @@ import type {
   AgentRunResult,
   AgentRunStatus,
 } from '../../domain/agents/agent-run.port';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { IdGenerator } from '../../core/utils/IdGenerator';
 import { setAgentSpanUsage, withExecuteToolSpan, withInvokeAgentSpan } from '../../monitoring';
 import {
@@ -71,7 +71,15 @@ interface RunState {
 const DEFAULT_LIMITS: AgentRunLimits = { maxSteps: 8 };
 const DEFAULT_MODEL_RETRY_BASE_MS = 500;
 const MAX_MODEL_RETRY_DELAY_MS = 8_000;
-const CLAIM_ATTEMPTS = 3;
+const APPEND_ATTEMPTS = 3;
+/** How long a ToolCallStarted keeps other executors away from that call. */
+const DEFAULT_TOOL_LEASE_MS = 15 * 60_000;
+
+/**
+ * Events other writers may add while an executor runs: a cancel and a person's
+ * decision. Any other event type in the stream comes from a second executor.
+ */
+const EXTERNAL_EVENT_TYPES: ReadonlySet<string> = new Set(['AgentRunCancelled', 'ToolApprovalDecided']);
 
 /** Another executor holds this run or already started this tool call. Nothing was executed. */
 export class AgentRunConflictError extends Error {
@@ -79,6 +87,20 @@ export class AgentRunConflictError extends Error {
     super(message, options);
     this.name = 'AgentRunConflictError';
   }
+}
+
+/** A second executor wrote to the stream. When that executor finished the run, its result is here. */
+class AgentRunTakenOverError extends AgentRunConflictError {
+  constructor(runId: string, readonly finished: AgentRunResult | undefined) {
+    super(`Agent run ${runId} is being executed by another executor`);
+    this.name = 'AgentRunTakenOverError';
+  }
+}
+
+/** The stream version this executor has written up to. Only one executor per run holds one. */
+interface RunWriter {
+  version: number;
+  readonly executorId: string;
 }
 
 /** Result journaled for a call whose process stopped between ToolCallStarted and ToolCallCompleted. */
@@ -115,6 +137,8 @@ export class AgentRunService {
   private readonly spillRoots = new Map<string, string>();
   /** Runs executing in this process. A second start/resume of the same run is refused. */
   private readonly active = new Set<string>();
+  /** The executor's stream position per active run. */
+  private readonly writers = new Map<string, RunWriter>();
 
   constructor(
     private readonly model: IChatCompletionModel,
@@ -131,7 +155,9 @@ export class AgentRunService {
 
   async start(request: AgentRunRequest): Promise<AgentRunResult> {
     const runId = request.runId ?? this.ids.generateRunId();
-    return this.exclusive(runId, () => this.startExclusive(runId, request));
+    // A new stream: AgentRunStarted must be version 1, so a second start of the same
+    // runId cannot interleave with the first.
+    return this.exclusive(runId, () => this.startExclusive(runId, request), 0);
   }
 
   private async startExclusive(runId: string, request: AgentRunRequest): Promise<AgentRunResult> {
@@ -171,7 +197,7 @@ export class AgentRunService {
   }
 
   async resume(runId: string, request: Omit<AgentRunRequest, 'messages'>): Promise<AgentRunResult> {
-    return this.exclusive(runId, () => this.resumeExclusive(runId, request));
+    return this.exclusive(runId, () => this.resumeExclusive(runId, request), undefined);
   }
 
   private async resumeExclusive(runId: string, request: Omit<AgentRunRequest, 'messages'>): Promise<AgentRunResult> {
@@ -190,6 +216,8 @@ export class AgentRunService {
       request.limits?.approvalTimeoutMs,
       request.correlationId,
     );
+    // From here on every write is checked against this version.
+    this.openWriter(runId, streamVersion(events));
     const stopped = await this.stopReason(runId, 0, request.correlationId);
     if (stopped) {
       return stopped;
@@ -261,7 +289,7 @@ export class AgentRunService {
   }
 
   async cancel(runId: string, correlationId: string): Promise<void> {
-    await this.append(runId, 'AgentRunCancelled', AgentRunCancelledSchema.parse({
+    await this.appendExternal(runId, 'AgentRunCancelled', AgentRunCancelledSchema.parse({
       runId,
       step: 0,
       correlationId,
@@ -420,7 +448,7 @@ export class AgentRunService {
     ) {
       return { error: 'denied: the policy changed the approved arguments' };
     }
-    if (!(await this.claimToolCall(runId, step, request.correlationId, toolCallId, name))) {
+    if (!(await this.claimToolCall(runId, step, request.correlationId, toolCallId, name, request.limits?.toolLeaseMs))) {
       return { error: 'denied: run cancelled before the call started' };
     }
 
@@ -534,7 +562,7 @@ export class AgentRunService {
     if (options?.expectedArgumentsHash && options.expectedArgumentsHash !== recordedHash) {
       throw new Error(`Agent run ${runId} approval ${toolCallId} arguments hash mismatch`);
     }
-    await this.append(runId, 'ToolApprovalDecided', ToolApprovalDecidedSchema.parse({
+    await this.appendExternal(runId, 'ToolApprovalDecided', ToolApprovalDecidedSchema.parse({
       runId,
       step: requested.step,
       correlationId,
@@ -569,7 +597,7 @@ export class AgentRunService {
     const calls = message.toolCalls ?? [];
     const decisions = new Map<string, { decision: 'approved' | 'denied' | 'expired'; argumentsHash?: string }>();
     const approvalRequests = new Map<string, ReturnType<typeof ToolApprovalRequestedSchema.parse>>();
-    const started = new Set<string>();
+    const started = new Map<string, ReturnType<typeof ToolCallStartedSchema.parse>>();
     const requested = new Set<string>();
     for (const event of events) {
       if (event.type === 'ToolApprovalDecided') {
@@ -579,7 +607,8 @@ export class AgentRunService {
         const payload = ToolApprovalRequestedSchema.parse(event.payload);
         approvalRequests.set(payload.toolCallId, payload);
       } else if (event.type === 'ToolCallStarted') {
-        started.add(ToolCallStartedSchema.parse(event.payload).toolCallId);
+        const payload = ToolCallStartedSchema.parse(event.payload);
+        started.set(payload.toolCallId, payload);
       } else if (event.type === 'ToolCallRequested') {
         requested.add(ToolCallRequestedSchema.parse(event.payload).toolCallId);
       }
@@ -591,7 +620,15 @@ export class AgentRunService {
       }
       const approval = approvalRequests.get(call.id);
       let output: unknown;
-      if (started.has(call.id)) {
+      const claim = started.get(call.id);
+      if (claim) {
+        // Unknown only once the claim's lease has run out. Before that the body may
+        // still be running on the executor that wrote the claim.
+        if (claim.leaseExpiresAt && Date.parse(claim.leaseExpiresAt) > Date.now()) {
+          throw new AgentRunConflictError(
+            `Agent run ${state.runId}: tool call ${call.id} may still be running (lease until ${claim.leaseExpiresAt})`,
+          );
+        }
         output = UNKNOWN_OUTCOME;
       } else if (approval) {
         const settled = decisions.get(call.id);
@@ -675,9 +712,10 @@ export class AgentRunService {
   }
 
   /**
-   * Records ToolCallStarted with the stream version this writer read. Two executors
-   * that read the same version cannot both succeed, and a call already started by
-   * anyone is never started again. Returns false when the run was cancelled.
+   * Records ToolCallStarted, checked against this executor's stream version: a
+   * second executor cannot claim the call, and nobody else wrote since this executor
+   * last looked. The claim carries a lease; until it ends a resume elsewhere does
+   * not call the outcome unknown. Returns false when the run was cancelled.
    */
   private async claimToolCall(
     runId: string,
@@ -685,48 +723,56 @@ export class AgentRunService {
     correlationId: string,
     toolCallId: string,
     name: string,
+    leaseMs: number | undefined,
   ): Promise<boolean> {
-    for (let attempt = 0; attempt < CLAIM_ATTEMPTS; attempt += 1) {
-      const events = await this.eventStore.getEvents(streamId(runId));
-      if (events.some((event) => event.type === 'AgentRunCancelled')) {
-        return false;
-      }
-      const taken = events.some((event) => (event.type === 'ToolCallStarted' || event.type === 'ToolCallCompleted')
-        && isRecord(event.payload) && event.payload.toolCallId === toolCallId);
-      if (taken) {
-        throw new AgentRunConflictError(`Agent run ${runId}: tool call ${toolCallId} was already started`);
-      }
-      const version = events.reduce((max, event) => Math.max(max, event.aggregateVersion ?? 0), 0);
-      const event = EventFactory.createBaseEvent(streamId(runId), 'ToolCallStarted', ToolCallStartedSchema.parse({
-        runId,
-        step,
-        correlationId,
-        toolCallId,
-        name,
-      }), correlationId);
-      event.aggregateVersion = version + 1;
-      try {
-        await this.eventStore.saveEvents([event], { expectedAggregateVersion: version });
-        return true;
-      } catch (error) {
-        if (!isVersionConflict(error)) {
-          throw error;
-        }
-      }
+    if (await this.isCancelled(runId)) {
+      return false;
     }
-    throw new AgentRunConflictError(`Agent run ${runId}: could not claim tool call ${toolCallId}`);
+    const writer = this.writers.get(runId);
+    return this.append(runId, 'ToolCallStarted', ToolCallStartedSchema.parse({
+      runId,
+      step,
+      correlationId,
+      toolCallId,
+      name,
+      executorId: writer?.executorId,
+      leaseExpiresAt: new Date(Date.now() + (leaseMs ?? DEFAULT_TOOL_LEASE_MS)).toISOString(),
+    }), { abortOnCancel: true });
   }
 
-  private async exclusive<T>(runId: string, body: () => Promise<T>): Promise<T> {
+  /**
+   * One execution of one run in this process. `initialVersion` opens the writer at
+   * once (a new run starts at 0); resume opens it after reading the stream. When a
+   * second executor wrote meanwhile, this one stops; if that executor finished the
+   * run, its result is returned instead of an error.
+   */
+  private async exclusive(
+    runId: string,
+    body: () => Promise<AgentRunResult>,
+    initialVersion: number | undefined,
+  ): Promise<AgentRunResult> {
     if (this.active.has(runId)) {
       throw new AgentRunConflictError(`Agent run ${runId} is already executing in this process`);
     }
     this.active.add(runId);
+    if (initialVersion !== undefined) {
+      this.openWriter(runId, initialVersion);
+    }
     try {
       return await body();
+    } catch (error) {
+      if (error instanceof AgentRunTakenOverError && error.finished) {
+        return error.finished;
+      }
+      throw error;
     } finally {
       this.active.delete(runId);
+      this.writers.delete(runId);
     }
+  }
+
+  private openWriter(runId: string, version: number): void {
+    this.writers.set(runId, { version, executorId: randomUUID() });
   }
 
   private async journalToolOutput(
@@ -810,7 +856,6 @@ export class AgentRunService {
     reason: AgentRunResult['reason'],
     content?: string,
   ): Promise<AgentRunResult> {
-    await this.noteSpillStatus(runId, reason);
     await this.append(runId, 'AgentRunFinished', AgentRunFinishedSchema.parse({
       runId,
       step,
@@ -818,14 +863,70 @@ export class AgentRunService {
       reason,
       content,
     }));
+    await this.noteSpillStatus(runId, reason);
     this.logger.log('agent_run_finished', { runId, reason, step });
     return { runId, reason, content };
   }
 
-  private async append(runId: string, type: string, payload: Record<string, unknown>): Promise<void> {
+  /**
+   * An executor's write. It must land right after the version this executor holds.
+   * If a cancel or a decision landed in between, the writer moves past it and
+   * writes again; with `abortOnCancel` a cancel makes it return false instead. If
+   * another executor wrote, this executor stops (AgentRunTakenOverError).
+   */
+  private async append(
+    runId: string,
+    type: string,
+    payload: Record<string, unknown>,
+    options?: { abortOnCancel?: boolean },
+  ): Promise<boolean> {
+    const writer = this.writers.get(runId);
+    if (!writer) {
+      await this.appendExternal(runId, type, payload);
+      return true;
+    }
+    for (let attempt = 0; attempt < APPEND_ATTEMPTS; attempt += 1) {
+      const event = EventFactory.createBaseEvent(streamId(runId), type, payload, String(payload.correlationId));
+      event.aggregateVersion = writer.version + 1;
+      try {
+        await this.eventStore.saveEvents([event], { expectedAggregateVersion: writer.version });
+        writer.version += 1;
+        return true;
+      } catch (error) {
+        if (!isVersionConflict(error)) {
+          throw error;
+        }
+        const events = await this.eventStore.getEvents(streamId(runId));
+        const newer = events.filter((item) => (item.aggregateVersion ?? 0) > writer.version);
+        if (newer.some((item) => !EXTERNAL_EVENT_TYPES.has(item.type))) {
+          throw new AgentRunTakenOverError(runId, finishedResult(runId, events));
+        }
+        if (options?.abortOnCancel && newer.some((item) => item.type === 'AgentRunCancelled')) {
+          writer.version = streamVersion(events);
+          return false;
+        }
+        writer.version = streamVersion(events);
+      }
+    }
+    throw new AgentRunConflictError(`Agent run ${runId}: could not append ${type}`);
+  }
+
+  /** A write from outside the executor (cancel, a person's decision): no version check. */
+  private async appendExternal(runId: string, type: string, payload: Record<string, unknown>): Promise<void> {
     const event = EventFactory.createBaseEvent(streamId(runId), type, payload, String(payload.correlationId));
     await this.eventStore.saveEvents([event]);
   }
+}
+
+function streamVersion(events: readonly DomainEvent[]): number {
+  return events.reduce((max, event) => Math.max(max, event.aggregateVersion ?? 0), 0);
+}
+
+function finishedResult(runId: string, events: readonly DomainEvent[]): AgentRunResult | undefined {
+  const finished = events.find((event) => event.type === 'AgentRunFinished');
+  if (!finished) return undefined;
+  const payload = AgentRunFinishedSchema.parse(finished.payload);
+  return { runId, reason: payload.reason, content: payload.content };
 }
 
 export function agentRunControls(flags: { isEnabled(flag: 'AGENTS_KILL_SWITCH'): boolean }): { isKillSwitchOn(): boolean } {

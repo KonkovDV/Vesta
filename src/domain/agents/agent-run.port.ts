@@ -13,6 +13,11 @@ export interface AgentRunLimits {
   compactAfterTokens?: number;
   /** First delay after a failed model call; doubles per failure, with jitter. Default 500 ms. */
   modelRetryBaseMs?: number;
+  /**
+   * Lease of a started tool call. A resume on another executor waits it out before
+   * journaling the call as outcome_unknown. Keep it above the longest tool timeout. Default 15 min.
+   */
+  toolLeaseMs?: number;
 }
 
 export interface AgentRunRequest {

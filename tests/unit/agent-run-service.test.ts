@@ -129,8 +129,8 @@ test('a call that was running when the process stopped is journaled as unknown, 
   const model = scriptedModel([reply([{ id: 'k', name: 'transfer', argumentsJson: '{}' }]), reply(undefined, 'done')]);
   const hanging = { execute: () => new Promise(() => undefined) };
   const crashed = new AgentRunService(model, hanging as never, { async evaluate() { return { allowed: true }; } } as never, store, logger as never);
-  void crashed.start({ messages: [{ role: 'user', content: 'x' }], correlationId, runId: 'r3' });
-  await new Promise((resolve) => setTimeout(resolve, 30));
+  void crashed.start({ messages: [{ role: 'user', content: 'x' }], correlationId, runId: 'r3', limits: { maxSteps: 8, toolLeaseMs: 5 } });
+  await new Promise((resolve) => setTimeout(resolve, 30)); // the claim's lease has run out
 
   let reruns = 0;
   const restarted = new AgentRunService(model, { async execute() { reruns += 1; return { ok: true }; } } as never, { async evaluate() { return { allowed: true }; } } as never, store, logger as never);
@@ -140,6 +140,72 @@ test('a call that was running when the process stopped is journaled as unknown, 
   assertToolCallsAnswered(model.transcripts[1]);
   const completed = (await store.getEvents(streamId('r3'))).find((event) => event.type === 'ToolCallCompleted');
   assert.match(String((completed?.payload as { output?: string }).output), new RegExp(UNKNOWN_OUTCOME.error));
+});
+
+test('while a claim lease is live, a resume elsewhere does not touch the run', async () => {
+  const store = new InMemoryEventStore();
+  const model = scriptedModel([reply([{ id: 'k', name: 'transfer', argumentsJson: '{}' }]), reply(undefined, 'done')]);
+  const running = new AgentRunService(model, { execute: () => new Promise(() => undefined) } as never, { async evaluate() { return { allowed: true }; } } as never, store, logger as never);
+  void running.start({ messages: [{ role: 'user', content: 'x' }], correlationId, runId: 'r3b', limits: { maxSteps: 8, toolLeaseMs: 60_000 } });
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  const before = (await store.getEvents(streamId('r3b'))).length;
+  const other = new AgentRunService(model, { async execute() { return { ok: true }; } } as never, { async evaluate() { return { allowed: true }; } } as never, store, logger as never);
+  await assert.rejects(other.resume('r3b', { correlationId }), AgentRunConflictError);
+  assert.equal((await store.getEvents(streamId('r3b'))).length, before, 'no outcome_unknown while the body may still run');
+});
+
+test('two executors never write two model steps or two finishes', async () => {
+  for (let round = 0; round < 25; round += 1) {
+    const store = new InMemoryEventStore();
+    let paid = 0;
+    const model = { async complete(messages: ChatMessage[]): Promise<ChatCompletion> {
+      await new Promise((resolve) => setTimeout(resolve, Math.random() * 5));
+      return messages.some((message) => message.role === 'tool')
+        ? reply(undefined, 'done')
+        : reply([{ id: 'pay', name: 'pay', argumentsJson: '{"a":1}' }]);
+    } };
+    const tools = { async execute() { await new Promise((resolve) => setTimeout(resolve, Math.random() * 10)); paid += 1; return { ok: true }; } };
+    const a = new AgentRunService(model, tools as never, approvalPolicy as never, store, logger as never);
+    const b = new AgentRunService(model, tools as never, approvalPolicy as never, store, logger as never);
+    const runId = `race-${round}`;
+    await a.start({ messages: [{ role: 'user', content: 'pay' }], correlationId, runId });
+    await a.decideApproval(runId, 'pay', 'approved', correlationId);
+    const delay = Math.random() * 20;
+    const results = await Promise.allSettled([
+      a.resume(runId, { correlationId }),
+      new Promise((resolve) => setTimeout(resolve, delay)).then(() => b.resume(runId, { correlationId })),
+    ]);
+    const events = await store.getEvents(streamId(runId));
+    assert.equal(paid, 1, `round ${round}: side effect once`);
+    assert.equal(events.filter((event) => event.type === 'AgentRunFinished').length, 1, `round ${round}: one finish`);
+    assert.equal(events.filter((event) => event.type === 'ModelCalled').length, 2, `round ${round}: two model steps`);
+    for (const result of results) {
+      if (result.status === 'rejected') assert.ok(result.reason instanceof AgentRunConflictError, String(result.reason));
+      else assert.equal(result.value.reason, 'completed');
+    }
+  }
+});
+
+test('a cancel that lands during a run is honoured at the next step, and the run is not taken over', async () => {
+  const store = new InMemoryEventStore();
+  let steps = 0;
+  const service = new AgentRunService(
+    { async complete() { steps += 1; if (steps === 1) await service.cancel('r9', correlationId); return reply([{ id: `c${steps}`, name: 'read', argumentsJson: '{}' }]); } } as never,
+    { async execute() { return { ok: true }; } } as never, { async evaluate() { return { allowed: true }; } } as never, store, logger as never,
+  );
+  const result = await service.start({ messages: [{ role: 'user', content: 'x' }], correlationId, runId: 'r9' });
+  assert.equal(result.reason, 'cancelled');
+  const finished = (await store.getEvents(streamId('r9'))).filter((event) => event.type === 'AgentRunFinished');
+  assert.equal(finished.length, 1);
+});
+
+test('a second start with the same runId returns the finished result instead of writing again', async () => {
+  const store = new InMemoryEventStore();
+  const service = new AgentRunService(scriptedModel([reply(undefined, 'done')]), {} as never, { async evaluate() { return { allowed: true }; } } as never, store, logger as never);
+  await service.start({ messages: [{ role: 'user', content: 'x' }], correlationId, runId: 'r10' });
+  const again = await service.start({ messages: [{ role: 'user', content: 'y' }], correlationId, runId: 'r10' });
+  assert.deepEqual(again, { runId: 'r10', reason: 'completed', content: 'done' });
+  assert.equal((await store.getEvents(streamId('r10'))).filter((event) => event.type === 'AgentRunStarted').length, 1);
 });
 
 test('a policy that rewrites approved arguments does not run them', async () => {
