@@ -57,9 +57,13 @@ test('two executors on PostgreSQL run an approved side effect once', { skip: !ba
 
   const results = await Promise.allSettled([a.resume('pg-run-1', { correlationId }), b.resume('pg-run-1', { correlationId })]);
   assert.equal(payments, 1);
-  const rejected = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected');
-  assert.equal(rejected.length, 1);
-  assert.ok(rejected[0].reason instanceof AgentRunConflictError, String(rejected[0].reason));
+  for (const result of results) {
+    if (result.status === 'rejected') {
+      assert.ok(result.reason instanceof AgentRunConflictError, String(result.reason));
+    } else {
+      assert.equal(result.value.reason, 'completed');
+    }
+  }
   await (storeA as unknown as { close(): Promise<void> }).close();
   await (storeB as unknown as { close(): Promise<void> }).close();
 });
