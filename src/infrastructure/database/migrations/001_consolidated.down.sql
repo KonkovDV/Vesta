@@ -61,6 +61,7 @@ DROP TABLE IF EXISTS outbox.dead_letter_queue;
 DROP TABLE IF EXISTS outbox.messages;
 
 -- §3 Event Store
+DROP TABLE IF EXISTS event_store.consumer_cursors;
 DROP TABLE IF EXISTS event_store.snapshots;
 DROP TABLE IF EXISTS event_store.events;
 DROP SEQUENCE IF EXISTS event_store_events_gsn_seq;

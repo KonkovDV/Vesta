@@ -391,7 +391,7 @@ export class PostgreSQLOutbox implements IOutbox {
         CREATE INDEX IF NOT EXISTS idx_outbox_event_gsn
         ON ${this.schema}.${this.outboxTable}(event_gsn);
       `);
-      // Same columns as migration 002_outbox_delivery.sql.
+      // Same columns as the outbox section of 001_consolidated.sql.
       await client.query(`
         ALTER TABLE ${this.schema}.${this.outboxTable}
         ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now()

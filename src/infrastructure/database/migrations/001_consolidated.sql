@@ -1,8 +1,8 @@
 -- ============================================================================
 -- MicroPhoenix — Consolidated Database Migration
 -- ============================================================================
--- Version : 1.1.0
--- Date    : 2026-10-23
+-- Version : 1.2.0
+-- Date    : 2026-10-24
 -- Purpose : The one baseline for a new database.
 --           Idempotent (IF NOT EXISTS / IF EXISTS). The runner applies it in
 --           one transaction and skips it on the next run when the checksum matches.
@@ -81,13 +81,18 @@ CREATE TABLE IF NOT EXISTS event_store.events (
   payload           JSONB        NOT NULL,
   metadata          JSONB,
   gsn               BIGINT       DEFAULT nextval('event_store_events_gsn_seq'),
-  payload_uri       TEXT
+  payload_uri       TEXT,
+  -- Writing transaction. A commit-order reader keeps rows whose tx_id is below
+  -- pg_snapshot_xmin. xid8 needs PostgreSQL 13. Apply this file to an empty
+  -- database: stamping existing rows with the migration transaction collapses order.
+  tx_id             xid8         NOT NULL DEFAULT pg_current_xact_id()
 );
 
 -- Safety ALTERs for existing databases (no-op on fresh deploy)
 ALTER TABLE event_store.events ADD COLUMN IF NOT EXISTS schema_version INTEGER NOT NULL DEFAULT 1;
 ALTER TABLE event_store.events ADD COLUMN IF NOT EXISTS gsn BIGINT;
 ALTER TABLE event_store.events ADD COLUMN IF NOT EXISTS payload_uri TEXT;
+ALTER TABLE event_store.events ADD COLUMN IF NOT EXISTS tx_id xid8 NOT NULL DEFAULT pg_current_xact_id();
 
 DO $$
 BEGIN
@@ -128,6 +133,9 @@ CREATE INDEX IF NOT EXISTS idx_events_metadata_gin
 CREATE INDEX IF NOT EXISTS idx_events_timestamp
   ON event_store.events(timestamp);
 
+CREATE INDEX IF NOT EXISTS idx_events_tx_gsn
+  ON event_store.events (tx_id, gsn);
+
 CREATE INDEX IF NOT EXISTS idx_events_mas_trace_id
   ON event_store.events ((payload->>'mas_trace_id'))
   WHERE payload->>'mas_trace_id' IS NOT NULL;
@@ -142,6 +150,14 @@ CREATE INDEX IF NOT EXISTS idx_events_semantic_embedding
 -- Comments
 COMMENT ON COLUMN event_store.events.payload_uri IS
   'URI to externalized payload blob (S3/GCS/Azure Blob). When present, the JSONB payload column contains {"__externalized": true} stub and the real content lives at this URI.';
+
+-- A journal consumer stores the last (tx_id, gsn) it finished. The store moves it forward only.
+CREATE TABLE IF NOT EXISTS event_store.consumer_cursors (
+  consumer   text PRIMARY KEY,
+  tx_id      xid8 NOT NULL,
+  gsn        bigint NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 
 -- Snapshots
 CREATE TABLE IF NOT EXISTS event_store.snapshots (
@@ -180,6 +196,10 @@ CREATE TABLE IF NOT EXISTS outbox.messages (
   transaction_id    VARCHAR(255),
   metadata          JSONB,
   payload_uri       TEXT,
+  -- A failed row waits until this instant. now() is STABLE, so adding it does not rewrite the table.
+  next_attempt_at   TIMESTAMPTZ  NOT NULL DEFAULT now(),
+  -- Claim token. PUBLISHED and FAILED updates must present the same token.
+  lease_token       TEXT,
 
   CONSTRAINT positive_version    CHECK (aggregate_version > 0),
   CONSTRAINT valid_status        CHECK (status IN ('PENDING','PROCESSING','PUBLISHED','FAILED','DEAD_LETTER')),
@@ -191,6 +211,8 @@ CREATE TABLE IF NOT EXISTS outbox.messages (
 ALTER TABLE outbox.messages ADD COLUMN IF NOT EXISTS event_gsn BIGINT;
 ALTER TABLE outbox.messages ADD COLUMN IF NOT EXISTS idempotency_key VARCHAR(255);
 ALTER TABLE outbox.messages ADD COLUMN IF NOT EXISTS payload_uri TEXT;
+ALTER TABLE outbox.messages ADD COLUMN IF NOT EXISTS next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now();
+ALTER TABLE outbox.messages ADD COLUMN IF NOT EXISTS lease_token TEXT;
 
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_outbox_status
@@ -204,6 +226,10 @@ CREATE INDEX IF NOT EXISTS idx_outbox_created_at
 
 CREATE INDEX IF NOT EXISTS idx_outbox_claim
   ON outbox.messages (created_at)
+  WHERE status IN ('PENDING', 'FAILED', 'PROCESSING');
+
+CREATE INDEX IF NOT EXISTS idx_outbox_due
+  ON outbox.messages (next_attempt_at, created_at)
   WHERE status IN ('PENDING', 'FAILED', 'PROCESSING');
 
 CREATE INDEX IF NOT EXISTS idx_outbox_aggregate_id

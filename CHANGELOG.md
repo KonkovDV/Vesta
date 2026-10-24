@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.0
+
+- The kernel baseline is one forward file again, `001_consolidated.sql`. It includes `tx_id`, the outbox lease columns, and `event_store.consumer_cursors`. `*.down.sql` is not applied. A database that stored the 2.11.0 checksum of `001_consolidated.sql` refuses this file. That is not an in-place upgrade.
+
 ## 2.11.0
 
 - One executor writes a run at a time. A second resume that loses the stream version stops with `AgentRunConflictError`, or returns the result when the first executor already finished. `ToolCallStarted` carries a lease, so a live body is not journaled as `outcome_unknown`. MP-K39. `tests/unit/agent-run-service.test.ts`, `tests/integration/agent-run-postgres.test.ts`.
