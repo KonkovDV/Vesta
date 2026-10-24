@@ -176,6 +176,7 @@ export const LegacyConfigSchema = z
     OPENAI_API_KEY: z.string().optional(),
     OPENAI_ORG_ID: z.string().optional(),
     OPENAI_BASE_URL: z.string().optional(),
+    OPENAI_MODEL: z.string().optional(),
     OPENAI_DEFAULT_MODEL: z.string().optional(),
     OPENAI_DEFAULT_EMBEDDING_MODEL: z.string().optional(),
     OPENAI_DEFAULT_MODERATION_MODEL: z.string().optional(),
@@ -183,6 +184,7 @@ export const LegacyConfigSchema = z
     OPENAI_MAX_RETRIES: z.string().optional(),
     ANTHROPIC_API_KEY: z.string().optional(),
     ANTHROPIC_BASE_URL: z.string().optional(),
+    ANTHROPIC_MODEL: z.string().optional(),
     LLM_ENABLE_FAILOVER: z.string().optional(),
     LLM_MAX_FAILOVER_ATTEMPTS: z.string().optional(),
 
@@ -242,5 +244,6 @@ export const LegacyConfigSchema = z
     JEST_WORKER_ID: z.string().optional(),
     USE_MOCK_AI: z.string().optional(),
     SELF_LLM_URL: z.string().optional(),
+    SELF_LLM_MODEL: z.string().optional(),
   })
   .passthrough();

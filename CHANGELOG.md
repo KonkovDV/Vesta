@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.1
+
+- `SELF_LLM_URL` calls `SELF_LLM_MODEL` on an OpenAI-compatible `/v1` endpoint. The old fixed name `session-self` is gone. `USE_MOCK_AI=true` still does not call that URL. `tests/unit/chat-model-selection.test.ts`. MP-K42.
+
 ## 2.12.0
 
 - The kernel baseline is one forward file again, `001_consolidated.sql`. It includes `tx_id`, the outbox lease columns, and `event_store.consumer_cursors`. `*.down.sql` is not applied. A database that stored the 2.11.0 checksum of `001_consolidated.sql` refuses this file. That is not an in-place upgrade.

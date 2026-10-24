@@ -195,13 +195,17 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
       // OpenAI / Mock AI
       USE_MOCK_AI: env.USE_MOCK_AI,
       SELF_LLM_URL: env.SELF_LLM_URL,
+      SELF_LLM_MODEL: env.SELF_LLM_MODEL,
       OPENAI_API_KEY: env.OPENAI_API_KEY,
       OPENAI_ORG_ID: env.OPENAI_ORG_ID,
       OPENAI_BASE_URL: env.OPENAI_BASE_URL,
+      OPENAI_MODEL: env.OPENAI_MODEL,
+      OPENAI_DEFAULT_MODEL: env.OPENAI_DEFAULT_MODEL,
       OPENAI_TIMEOUT_MS: env.OPENAI_TIMEOUT_MS,
       OPENAI_MAX_RETRIES: env.OPENAI_MAX_RETRIES,
       ANTHROPIC_API_KEY: env.ANTHROPIC_API_KEY,
       ANTHROPIC_BASE_URL: env.ANTHROPIC_BASE_URL,
+      ANTHROPIC_MODEL: env.ANTHROPIC_MODEL,
 
       // Per-flag metrics cardinality control
       FF_PER_FLAG_METRICS_ENABLED: env.FF_PER_FLAG_METRICS_ENABLED,

@@ -109,10 +109,11 @@ function mapToolCalls(
     if (call.type !== 'function') {
       continue;
     }
+    const raw: unknown = call.function.arguments;
     mapped.push({
       id: call.id,
       name: call.function.name,
-      argumentsJson: call.function.arguments,
+      argumentsJson: typeof raw === 'string' ? raw : JSON.stringify(raw ?? {}),
     });
   }
   return mapped;

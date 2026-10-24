@@ -9,6 +9,7 @@ import { getConfig } from '../../../config';
 import { createOpenAIAdapterFromEnv } from '../../ai/OpenAIAdapter';
 import { AnthropicChatModel } from '../../adapters/llm/AnthropicChatModel';
 import { OpenAICompatibleChatModel } from '../../adapters/llm/OpenAICompatibleChatModel';
+import { selectChatModel } from '../../adapters/llm/select-chat-model';
 import { PluginBasedArticleFinder } from '../../research/PluginBasedArticleFinder';
 import { ArticleFinderResearchService } from '../../research/ArticleFinderResearchService';
 import { LLMArticleSummarizer } from '../../research/LLMArticleSummarizer';
@@ -64,9 +65,8 @@ export function registerAIServices(): void {
       );
     }
 
-    const selfLlmUrl = (config.SELF_LLM_URL || '').trim();
-    const anthropicBaseUrl = (config.ANTHROPIC_BASE_URL || '').trim();
-    if (useMockAI && config.NODE_ENV !== 'test') {
+    const chatChoice = selectChatModel(config);
+    if (chatChoice.kind === 'mock') {
       // Skeleton mode stubs the agent loop's model too. Before, USE_MOCK_AI=true left
       // IChatCompletionModel to ANTHROPIC_BASE_URL / SELF_LLM_URL / provider keys, so
       // a "mock" run could call a real endpoint.
@@ -86,64 +86,34 @@ export function registerAIServices(): void {
           description: 'Mock chat completion model for Skeleton Mode',
         },
       );
-    } else if (anthropicBaseUrl && config.NODE_ENV !== 'test') {
+    } else if (chatChoice.kind === 'anthropic') {
       container.register(
         DI_TOKENS.IChatCompletionModel,
         () => new AnthropicChatModel({
-          apiKey: config.ANTHROPIC_API_KEY || 'session-self',
-          baseURL: anthropicBaseUrl.replace(/\/+$/, ''),
-          model: 'session-anthropic',
-          timeoutMs: 90_000,
+          apiKey: chatChoice.apiKey,
+          baseURL: chatChoice.baseURL,
+          model: chatChoice.model,
+          timeoutMs: chatChoice.timeoutMs,
         }),
         {
           lifecycle: 'singleton',
-          tags: ['ai', 'chat', 'anthropic', 'self'],
-          description: 'Anthropic chat completion model pointed at ANTHROPIC_BASE_URL',
+          tags: ['ai', 'chat', 'anthropic'],
+          description: 'Anthropic chat completion model',
         },
       );
-    } else if (selfLlmUrl && config.NODE_ENV !== 'test') {
-      const normalizedBase = selfLlmUrl.replace(/\/+$/, '');
-      const baseURL = normalizedBase.endsWith('/v1') ? normalizedBase : `${normalizedBase}/v1`;
+    } else if (chatChoice.kind === 'openai-compatible') {
       container.register(
         DI_TOKENS.IChatCompletionModel,
         () => new OpenAICompatibleChatModel({
-          apiKey: 'session-self',
-          baseURL,
-          model: 'session-self',
-          timeoutMs: 90_000,
-        }),
-        {
-          lifecycle: 'singleton',
-          tags: ['ai', 'chat', 'self'],
-          description: 'Chat completion model backed by the local session bridge',
-        },
-      );
-    } else if (config.OPENAI_API_KEY) {
-      container.register(
-        DI_TOKENS.IChatCompletionModel,
-        () => new OpenAICompatibleChatModel({
-          apiKey: config.OPENAI_API_KEY as string,
-          baseURL: config.OPENAI_BASE_URL || 'https://api.openai.com/v1',
-          model: (process.env.OPENAI_MODEL ?? '').trim() || 'gpt-4o-mini',
+          apiKey: chatChoice.apiKey,
+          baseURL: chatChoice.baseURL,
+          model: chatChoice.model,
+          timeoutMs: chatChoice.timeoutMs,
         }),
         {
           lifecycle: 'singleton',
           tags: ['ai', 'chat', 'openai-compatible'],
           description: 'Chat completion model with tool-role history',
-        },
-      );
-    } else if (config.ANTHROPIC_API_KEY) {
-      container.register(
-        DI_TOKENS.IChatCompletionModel,
-        () => new AnthropicChatModel({
-          apiKey: config.ANTHROPIC_API_KEY as string,
-          baseURL: 'https://api.anthropic.com',
-          model: (process.env.ANTHROPIC_MODEL ?? '').trim() || 'claude-sonnet-4-5',
-        }),
-        {
-          lifecycle: 'singleton',
-          tags: ['ai', 'chat', 'anthropic'],
-          description: 'Anthropic chat completion model with tool_use history',
         },
       );
     }
