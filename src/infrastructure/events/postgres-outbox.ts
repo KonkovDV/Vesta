@@ -1264,12 +1264,19 @@ export class PostgreSQLOutbox implements IOutbox {
     const attemptWrite = async (attempt: number): Promise<OutboxMessage[]> => {
       await client.query('SAVEPOINT outbox_batch');
       try {
+        // Queue every writer of these aggregates until this transaction ends.
+        // Locking only the current head misses a row inserted after that head:
+        // the waiter still observes the old version and appends another.
+        const aggregateIds = [...new Set(events.map((event) => event.aggregateId))].sort();
+        await aggregateIds.reduce<Promise<void>>(async (previous, aggregateId) => {
+          await previous;
+          await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [aggregateId]);
+        }, Promise.resolve());
         if (expected !== undefined) {
-          // Lock the head row so concurrent writers queue here; the unique key catches
-          // a writer that raced in after the head we read (or onto an empty stream).
           const current = await client.query(
-            `SELECT aggregate_version AS v FROM ${this.eventStoreSchema}.${this.eventStoreEventsTable}
-              WHERE aggregate_id = $1 ORDER BY aggregate_version DESC LIMIT 1 FOR UPDATE`,
+            `SELECT COALESCE(MAX(aggregate_version), 0) AS v
+               FROM ${this.eventStoreSchema}.${this.eventStoreEventsTable}
+              WHERE aggregate_id = $1`,
             [events[0].aggregateId],
           );
           const actual = Number(current.rows[0]?.v ?? 0);

@@ -20,7 +20,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 | Field | Value |
 | --- | --- |
-| Version | 2.12.2 (`package.json`) |
+| Version | 2.12.3 (`package.json`) |
 | Runtime | Node.js 24 |
 | Maturity | Self-assessed TRL 4 in the sense of ISO 16290: a component exercised in the laboratory. Not a certificate and not a deployed service. |
 | Status words | `pinned` — a product names a 40-character commit. `ready` — `/health/ready` is 200 with the three real-store flags. Neither word means a model is accurate or a filing was sent. |

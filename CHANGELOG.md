@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.12.3
+
+- Two writers that pass the same `expectedAggregateVersion` cannot both commit. The head-row lock did not see a version inserted after that row, so both writes succeeded. Writers of one aggregate now queue on a transaction lock, then read `MAX(aggregate_version)`. `tests/integration/outbox-delivery.test.ts`. MP-K40.
+
 ## 2.12.2
 
 - CI boots the kernel on the integration job and resolves every registered token. A failing name that is not in `tests/gates/resolve-all-budget.json` fails the job. The list is a ceiling (27 names from 2026-10-24). MP-K35.
