@@ -94,7 +94,6 @@ function applyGateEnv(overrides) {
     STANDARD_PLUGINS: '',
     EVENT_BUS_REQUIRE_SUBSCRIBER: 'false',
     BFF_API_KEY: 'ci-gate-bff-key-not-secret',
-    INFRA_INIT_TIMEOUT_MS: '120000',
     FF_USEREALEVENTSTORE: 'true',
     FF_USEREALEVENTBUS: 'true',
     FF_USEREALOUTBOX: 'true',
