@@ -1,0 +1,12 @@
+{
+  "description": "Routes that may answer without an API key. Any other route whose status is not 401 or 403 fails the gate. 404 is not treated as an answer (MP-K31). /health/migration and POST /ent/slack/slash are public today; the Slack route checks a signature, not the BFF key.",
+  "routes": [
+    "GET /health",
+    "GET /health/live",
+    "GET /healthz",
+    "GET /metrics",
+    "GET /health/ready",
+    "GET /health/migration",
+    "POST /ent/slack/slash"
+  ]
+}

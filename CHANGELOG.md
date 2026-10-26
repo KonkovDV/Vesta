@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.12.2
+
+- CI boots the kernel on the integration job and resolves every registered token. A failing name that is not in `tests/gates/resolve-all-budget.json` fails the job. The list is a ceiling (27 names from 2026-10-24). MP-K35.
+- The same job requests every walked route without a key. A status other than 401 or 403 fails unless the route is in `tests/gates/public-routes.json`. 404 is not counted as an answer. `tests/unit/ci-gates.test.ts`.
+
 ## 2.12.1
 
 - `SELF_LLM_URL` calls `SELF_LLM_MODEL` on an OpenAI-compatible `/v1` endpoint. The old fixed name `session-self` is gone. `USE_MOCK_AI=true` still does not call that URL. `tests/unit/chat-model-selection.test.ts`. MP-K42.

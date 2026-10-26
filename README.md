@@ -20,7 +20,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 | Field | Value |
 | --- | --- |
-| Version | 2.12.1 (`package.json`) |
+| Version | 2.12.2 (`package.json`) |
 | Runtime | Node.js 24 |
 | Maturity | Self-assessed TRL 4 in the sense of ISO 16290: a component exercised in the laboratory. Not a certificate and not a deployed service. |
 | Status words | `pinned` — a product names a 40-character commit. `ready` — `/health/ready` is 200 with the three real-store flags. Neither word means a model is accurate or a filing was sent. |
@@ -29,7 +29,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 ## What is claimed
 
-The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs typecheck, `npm test` on Node 24 and 26, the build, the production audit, and an integration job with pgvector and Redis. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
+The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs typecheck, `npm test` on Node 24 and 26, the build, the production audit, and an integration job with pgvector and Redis. That job also resolves every DI token against a fixed ceiling and requests every route without a key. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
 
 ## What is not claimed
 

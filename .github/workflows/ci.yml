@@ -87,3 +87,12 @@ jobs:
         env:
           TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
           TEST_REDIS_URL: redis://127.0.0.1:6379
+      - name: Resolve-all ceiling and route allowlist
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          REDIS_URL: redis://127.0.0.1:6379
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: "6379"
+        run: |
+          node scripts/ci-resolve-all.cjs
+          node scripts/ci-routes-auth.cjs
