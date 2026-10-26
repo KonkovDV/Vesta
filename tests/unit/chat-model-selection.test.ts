@@ -44,3 +44,16 @@ test('unit tests do not select a live model from SELF_LLM_URL', () => {
 test('/v1 is not appended twice', () => {
   assert.equal(openAiCompatibleBase('http://127.0.0.1:11434/v1/'), 'http://127.0.0.1:11434/v1');
 });
+
+test('a provider base URL is used as written', () => {
+  const choice = selectChatModel({
+    NODE_ENV: 'development',
+    OPENAI_API_KEY: 'test-key',
+    OPENAI_BASE_URL: 'https://proxy.example/openai/deployments/chat',
+    OPENAI_MODEL: 'gpt-4o-mini',
+  });
+  assert.equal(choice.kind, 'openai-compatible');
+  if (choice.kind !== 'openai-compatible') return;
+  assert.equal(choice.baseURL, 'https://proxy.example/openai/deployments/chat');
+  assert.equal(choice.model, 'gpt-4o-mini');
+});

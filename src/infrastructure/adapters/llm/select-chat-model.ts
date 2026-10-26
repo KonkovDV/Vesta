@@ -70,7 +70,7 @@ export function selectChatModel(config: ChatModelConfig): ChatModelChoice {
     return {
       kind: 'openai-compatible',
       apiKey: openaiKey,
-      baseURL: openAiCompatibleBase(config.OPENAI_BASE_URL || 'https://api.openai.com/v1'),
+      baseURL: (config.OPENAI_BASE_URL || 'https://api.openai.com/v1').trim().replace(/\/+$/, ''),
       model,
       timeoutMs: 30_000,
     };
