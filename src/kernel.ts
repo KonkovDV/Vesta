@@ -33,8 +33,20 @@ export type {
   ICronJobRepository,
   ICronService,
 } from './domain/scheduling/cron-service.port';
-export { MCP_HTTP_AGENT_ID, mcpHttpAccessContext, mountMcpHttp } from './infrastructure/http/mcp-http-mount';
-export type { McpHttpMountOptions } from './infrastructure/http/mcp-http-mount';
+export { MCP_HTTP_AGENT_ID, mcpHttpAccessContext } from './infrastructure/http/mcp-http-access';
+export type { McpHttpMountOptions } from './infrastructure/http/mcp-http-access';
+
+/**
+ * Attaches MCP HTTP on an app the product owns. Loaded on call so importing
+ * the kernel does not parse configuration.
+ */
+export async function mountMcpHttp(
+  app: { use: (...args: Array<unknown>) => unknown },
+  options: import('./infrastructure/http/mcp-http-access').McpHttpMountOptions,
+): Promise<void> {
+  const loaded = await import('./infrastructure/http/mcp-http-mount');
+  loaded.mountMcpHttp(app, options);
+}
 
 export interface KernelExtension {
   readonly name: string;
