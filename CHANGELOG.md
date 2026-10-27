@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.15.0
+
+- `runKernel()` no longer mounts `/api/mcp` after the 404 handler. That mount logged success and answered 404. A product calls `mountMcpHttp` from extension `routes`, which runs before the 404 handler. A request without a key answers 401. The tool-policy agent id stays `mcp-http-client` when the URL says `researcher-x`. MP-K31. `tests/unit/mcp-http-mount.test.ts`.
+
 ## 2.14.0
 
 - `002_runtime_tables.sql` creates the seven `learning_*` tables, the three `error_graph_*` tables, and their HNSW indexes. `001_consolidated.sql` is unchanged, so a database that already applied it accepts this file. With `DB_RUNTIME_DDL` unset, the event store, the outbox, the MAS store, the learning stores, and the error graph check for those tables and do not create them. `DB_RUNTIME_DDL=true` restores the old statements. MP-K24. `tests/integration/runtime-tables.test.ts`.

@@ -33,6 +33,8 @@ export type {
   ICronJobRepository,
   ICronService,
 } from './domain/scheduling/cron-service.port';
+export { MCP_HTTP_AGENT_ID, mcpHttpAccessContext, mountMcpHttp } from './infrastructure/http/mcp-http-mount';
+export type { McpHttpMountOptions } from './infrastructure/http/mcp-http-mount';
 
 export interface KernelExtension {
   readonly name: string;

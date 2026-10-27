@@ -21,6 +21,10 @@ Record that SHA in one source file of the project and test that `package.json` c
 
 `migrationsDir` on an extension is the path you pass to `--dir`. `runKernel` does not apply SQL itself.
 
+## MCP HTTP
+
+`runKernel()` does not mount `/api/mcp`. The previous mount ran after the 404 handler, so every request answered 404. A product that wants Streamable HTTP calls `mountMcpHttp` from `routes`, which runs before that handler. The tool-policy agent id is `mcp-http-client`. The `:clientName` segment of the URL does not select a tool profile. This mount checks the kernel API key. It does not implement the MCP OAuth grant.
+
 ## Imports
 
 Import `runKernel`, `KernelExtension`, `KernelStartError`, and the types re-exported from the package root. Deep paths under `microphoenix/dist` are closed by `package.json` `exports`.
