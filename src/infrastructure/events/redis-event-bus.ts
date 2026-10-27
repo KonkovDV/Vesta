@@ -29,6 +29,9 @@ import { getMetricsConfig } from '../../core/config/app-config';
 import { CorrelationIdProvider } from '../../core/correlation/correlation';
 import { IdGenerator } from '../../core/utils/IdGenerator';
 import { getConfig, getRawEnv } from '../../config';
+import { selectEventBusTransport } from './event-bus-transport';
+import { RedisStreamsEventBus } from './redis-streams-event-bus';
+import { createPostgresProcessedEventClaim } from './processed-event-claim';
 import { safeJsonParse, tryJsonParse } from '../../core/utils/json';
 import type { IStructuredLogger } from '../../core/logging/IStructuredLogger';
 
@@ -997,8 +1000,26 @@ export function createRedisEventBus(config: RedisEventBusConfig): RedisEventBus 
 /**
  * Создать Event Bus из переменных окружения
  */
-export function createRedisEventBusFromEnv(): RedisEventBus {
+export function createRedisEventBusFromEnv(): IEventBus {
   const base = getRedisEventBusConfig();
+  const env = getRawEnv();
+  if (selectEventBusTransport(env.EVENT_BUS_TRANSPORT) === 'streams') {
+    const databaseUrl = env.DATABASE_URL;
+    return new RedisStreamsEventBus({
+      connection: {
+        host: base.connection.host,
+        port: base.connection.port,
+        password: base.connection.password,
+        db: base.connection.db,
+      },
+      keyPrefix: base.keyPrefix,
+      groupName: env.EVENT_BUS_STREAM_GROUP,
+      maxLen: env.EVENT_BUS_STREAM_MAXLEN ? Number(env.EVENT_BUS_STREAM_MAXLEN) : undefined,
+      maxDeliveries: env.EVENT_BUS_STREAM_MAX_DELIVERIES ? Number(env.EVENT_BUS_STREAM_MAX_DELIVERIES) : undefined,
+      minIdleMs: env.EVENT_BUS_STREAM_MIN_IDLE_MS ? Number(env.EVENT_BUS_STREAM_MIN_IDLE_MS) : undefined,
+      claim: databaseUrl ? createPostgresProcessedEventClaim(databaseUrl) : undefined,
+    });
+  }
   const appConfig = getConfig();
   const isTestEnv = Boolean(appConfig.JEST_WORKER_ID || appConfig.NODE_ENV === 'test');
 

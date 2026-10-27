@@ -20,7 +20,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 | Field | Value |
 | --- | --- |
-| Version | 2.12.3 (`package.json`) |
+| Version | 2.13.0 (`package.json`) |
 | Runtime | Node.js 24 |
 | Maturity | Self-assessed TRL 4 in the sense of ISO 16290: a component exercised in the laboratory. Not a certificate and not a deployed service. |
 | Status words | `pinned` — a product names a 40-character commit. `ready` — `/health/ready` is 200 with the three real-store flags. Neither word means a model is accurate or a filing was sent. |
@@ -39,7 +39,7 @@ A web client, a collections product, a measured model score, exactly-once delive
 
 - Starts one process: `src/index.ts` calls `runKernel()`.
 - Restores state from an append-only event journal.
-- Publishes through an outbox. Redis Pub/Sub accepts the row at least once. A publish with no subscriber is lost. MP-K22.
+- Publishes through an outbox. The default bus is Redis Pub/Sub: a publish with no subscriber is lost. `EVENT_BUS_TRANSPORT=streams` keeps the entry until a consumer acknowledges it. MP-K22.
 - Lets a project add services, HTTP routes, and SQL migrations without editing the kernel.
 - Refuses to replace a service the kernel already registered.
 - Stops a tool body in `ToolRegistry` when the call requires approval and does not carry `approvalGranted`.

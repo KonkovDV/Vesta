@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.13.0
+
+- `EVENT_BUS_TRANSPORT=streams` appends each event to a Redis stream. A consumer that is down at publish time still reads the entry when it starts. A handler that throws leaves the entry pending, and the next consumer claims it. After a successful handler, `processed_events` records the id so that consumer does not run it again. The default remains Pub/Sub. MP-K22. `tests/integration/redis-streams-bus.test.ts`.
+
 ## 2.12.3
 
 - Two writers that pass the same `expectedAggregateVersion` cannot both commit. The head-row lock did not see a version inserted after that row, so both writes succeeded. Writers of one aggregate now queue on a transaction lock, then read `MAX(aggregate_version)`. `tests/integration/outbox-delivery.test.ts`. MP-K40.
