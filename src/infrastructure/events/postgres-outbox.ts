@@ -21,6 +21,7 @@ import {
   type OutboxSaveOptions,
 } from '../../domain/events/outbox.interface';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
+import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
 import { DomainEvent } from '../../domain/events/event-store.interface';
 import { IEventBus } from '../../domain/events/event-bus.interface';
 import { getOrCreateCounter, getOrCreateHistogram } from '../../monitoring';
@@ -360,6 +361,16 @@ export class PostgreSQLOutbox implements IOutbox {
 
     const client = await this.pool.connect();
     try {
+      if (!runtimeDdlEnabled()) {
+        await requireQualifiedTables(
+          (sql, params) => client.query(sql, params),
+          [`${this.schema}.${this.outboxTable}`, `${this.schema}.${this.dlqTable}`],
+        );
+        await this.verifySchemaAfterInit(client);
+        this.isInitialized = true;
+        return;
+      }
+
       // 1. Создание схемы
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${this.schema}`);
       
@@ -409,6 +420,9 @@ export class PostgreSQLOutbox implements IOutbox {
     } catch (error) {
       // Ignore concurrent DDL race (23505 = unique_violation) during initialization
       const pgError = error as { code?: string };
+      if (error instanceof Error && error.message.includes('Apply migrations')) {
+        throw error;
+      }
       if (pgError?.code === '23505') {
         console.log('ℹ️ Concurrent DDL race detected (23505), continuing initialization');
         this.isInitialized = true;

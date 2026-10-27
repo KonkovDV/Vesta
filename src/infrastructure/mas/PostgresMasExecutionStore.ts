@@ -19,6 +19,7 @@ import {
   isValidPostgresIdentifier,
   qualifyIdentifier,
 } from '../database/postgres-identifiers';
+import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
 import {
   castToMasTaskStatus,
   castToMasExecutionStatus,
@@ -221,6 +222,17 @@ export class PostgresMasExecutionStore implements MasExecutionStore {
   async initialize(): Promise<void> {
     const client = await this.pool.connect();
     try {
+      if (!runtimeDdlEnabled()) {
+        await requireQualifiedTables(
+          (sql, params) => client.query(sql, params),
+          [
+            `${this.schema}.${this.taskExecutionsTable}`,
+            `${this.schema}.${this.stepsTable}`,
+            `${this.schema}.event_outbox`,
+          ],
+        );
+        return;
+      }
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${this.schema}`);
       await client.query(`
         CREATE TABLE IF NOT EXISTS ${this.schema}.${this.taskExecutionsTable} (

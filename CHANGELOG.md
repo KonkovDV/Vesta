@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.14.0
+
+- `002_runtime_tables.sql` creates the seven `learning_*` tables, the three `error_graph_*` tables, and their HNSW indexes. `001_consolidated.sql` is unchanged, so a database that already applied it accepts this file. With `DB_RUNTIME_DDL` unset, the event store, the outbox, the MAS store, the learning stores, and the error graph check for those tables and do not create them. `DB_RUNTIME_DDL=true` restores the old statements. MP-K24. `tests/integration/runtime-tables.test.ts`.
+
 ## 2.13.0
 
 - `EVENT_BUS_TRANSPORT=streams` appends each event to a Redis stream. A consumer that is down at publish time still reads the entry when it starts. A handler that throws leaves the entry pending, and the next consumer claims it. After a successful handler, `processed_events` records the id so that consumer does not run it again. The default remains Pub/Sub. MP-K22. `tests/integration/redis-streams-bus.test.ts`.

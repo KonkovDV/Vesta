@@ -25,6 +25,7 @@ import {
 } from '../../core/config/app-config';
 import { CorrelationIdProvider } from '../../core/correlation/correlation';
 import { isValidPostgresIdentifier, qualifyIdentifier } from '../database/postgres-identifiers';
+import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
 import { getConfig } from '../../config';
 import { tryJsonParse } from '../../core/utils/json';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
@@ -284,6 +285,13 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   async initialize(): Promise<void> {
     const client = await this.pool.connect();
     try {
+      if (!runtimeDdlEnabled()) {
+        await requireQualifiedTables(
+          (sql, params) => client.query(sql, params),
+          [`${this.schema}.${this.eventsTable}`, `${this.schema}.${this.snapshotsTable}`],
+        );
+        return;
+      }
       await client.query(`CREATE SCHEMA IF NOT EXISTS ${this.schema}`);
       await client.query(`
         CREATE TABLE IF NOT EXISTS ${this.schema}.${this.eventsTable} (

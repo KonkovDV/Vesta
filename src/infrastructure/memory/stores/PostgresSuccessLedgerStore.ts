@@ -4,6 +4,7 @@ import type {
   SuccessLedgerEntryFilter,
 } from '../../../domain/memory/ISuccessLedgerStore';
 import type { IDatabaseConnection } from '../../../domain/persistence/IDatabaseConnection';
+import { requirePublicTables, runtimeDdlEnabled } from '../../database/runtime-ddl';
 import { safeJsonParse } from '../../../core/utils/json';
 
 const SUCCESS_LEDGER_TABLE = 'learning_success_ledger_entries';
@@ -78,6 +79,12 @@ export class PostgresSuccessLedgerStore implements ISuccessLedgerStore {
 
   private async ensureSchema(): Promise<void> {
     if (this.schemaInitialized) {
+      return;
+    }
+
+    if (!runtimeDdlEnabled()) {
+      await requirePublicTables(this.db, [SUCCESS_LEDGER_TABLE]);
+      this.schemaInitialized = true;
       return;
     }
 

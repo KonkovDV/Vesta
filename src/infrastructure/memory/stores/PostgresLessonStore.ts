@@ -2,6 +2,7 @@ import type { ExtractedLesson, SamuleLevel } from '../../../domain/agents/IS2iLe
 import type { ILessonStore } from '../../../domain/memory/ILessonStore';
 import type { ConsolidatedPrinciple } from '../../../domain/memory/IWisdomConsolidator';
 import type { IDatabaseConnection } from '../../../domain/persistence/IDatabaseConnection';
+import { requirePublicTables, runtimeDdlEnabled } from '../../database/runtime-ddl';
 import { safeJsonParse } from '../../../core/utils/json';
 
 const LESSONS_TABLE = 'learning_extracted_lessons';
@@ -98,6 +99,12 @@ export class PostgresLessonStore implements ILessonStore {
 
   private async ensureSchema(): Promise<void> {
     if (this.schemaInitialized) {
+      return;
+    }
+
+    if (!runtimeDdlEnabled()) {
+      await requirePublicTables(this.db, [LESSONS_TABLE, PRINCIPLES_TABLE]);
+      this.schemaInitialized = true;
       return;
     }
 

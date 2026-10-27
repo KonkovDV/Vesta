@@ -20,7 +20,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 | Field | Value |
 | --- | --- |
-| Version | 2.13.0 (`package.json`) |
+| Version | 2.14.0 (`package.json`) |
 | Runtime | Node.js 24 |
 | Maturity | Self-assessed TRL 4 in the sense of ISO 16290: a component exercised in the laboratory. Not a certificate and not a deployed service. |
 | Status words | `pinned` — a product names a 40-character commit. `ready` — `/health/ready` is 200 with the three real-store flags. Neither word means a model is accurate or a filing was sent. |
@@ -130,7 +130,7 @@ The only supported import is `microphoenix`. `microphoenix/dist/...` is rejected
 | `npm run migrate` | Apply kernel migrations. Extra directories: `npm run migrate -- --dir ./migrations` |
 | `npm start` | `node dist/index.js` |
 
-The kernel baseline is one file, `001_consolidated.sql`. The second run skips it when the checksum matches. A project directory passed with `--dir` still runs after it. A database that already applied an older copy of this filename cannot take the new checksum.
+The kernel baseline is `001_consolidated.sql`. `002_runtime_tables.sql` follows it. The second run skips a file when its checksum matches. A project directory passed with `--dir` still runs after these files. A database that already applied an older copy of `001_consolidated.sql` cannot take a new checksum of that same filename.
 
 ## Outbound HTTP
 

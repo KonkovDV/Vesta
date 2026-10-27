@@ -2,6 +2,7 @@ import { safeJsonParse } from '../../../core/utils/json';
 import type { ITipStore, TipFeedbackState, TipStoreFilter } from '../../../domain/memory/ITipStore';
 import type { StructuredTip } from '../../../domain/memory/IContextualTipGenerator';
 import type { IDatabaseConnection } from '../../../domain/persistence/IDatabaseConnection';
+import { requirePublicTables, runtimeDdlEnabled } from '../../database/runtime-ddl';
 
 const TIPS_TABLE = 'learning_structured_tips';
 const FEEDBACK_TABLE = 'learning_tip_feedback';
@@ -108,6 +109,12 @@ export class PostgresTipStore implements ITipStore {
 
   private async ensureSchema(): Promise<void> {
     if (this.schemaInitialized) {
+      return;
+    }
+
+    if (!runtimeDdlEnabled()) {
+      await requirePublicTables(this.db, [TIPS_TABLE, FEEDBACK_TABLE]);
+      this.schemaInitialized = true;
       return;
     }
 

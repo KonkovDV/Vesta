@@ -17,6 +17,7 @@
 
 import type { CorrelationId } from '@/ai-types';
 import type { IDatabaseConnection } from '../../domain/persistence/IDatabaseConnection';
+import { requirePublicTables, runtimeDdlEnabled } from '../database/runtime-ddl';
 import type {
   IErrorGraphRepository,
   ErrorGraphNode,
@@ -128,6 +129,7 @@ export class PgErrorGraphRepository implements IErrorGraphRepository {
    */
   async ensureHnswIndex(): Promise<void> {
     await this.ensureSchema();
+    if (!runtimeDdlEnabled()) return;
     const indices = [
       { name: 'embedding', ddl: HNSW_INDEX_DDL_EMBEDDING },
       { name: 'ast_embedding', ddl: HNSW_INDEX_DDL_AST },
@@ -435,6 +437,12 @@ export class PgErrorGraphRepository implements IErrorGraphRepository {
 
   private async ensureSchema(): Promise<void> {
     if (this.schemaInitialized) {
+      return;
+    }
+
+    if (!runtimeDdlEnabled()) {
+      await requirePublicTables(this.db, ['error_graph_errors', 'error_graph_patterns', 'error_graph_fixes']);
+      this.schemaInitialized = true;
       return;
     }
 

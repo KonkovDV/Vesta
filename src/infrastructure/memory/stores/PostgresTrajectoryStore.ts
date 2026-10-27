@@ -2,6 +2,7 @@ import type { ContrastiveTrajectoryEntry } from '../../../domain/memory/IContras
 import type { ITrajectoryStore } from '../../../domain/memory/ITrajectoryStore';
 import type { TrajectoryIntelligenceResult } from '../../../domain/memory/ITrajectoryIntelligenceExtractor';
 import type { IDatabaseConnection } from '../../../domain/persistence/IDatabaseConnection';
+import { requirePublicTables, runtimeDdlEnabled } from '../../database/runtime-ddl';
 import { safeJsonParse } from '../../../core/utils/json';
 
 const INTELLIGENCE_TABLE = 'learning_trajectory_intelligence';
@@ -89,6 +90,12 @@ export class PostgresTrajectoryStore implements ITrajectoryStore {
 
   private async ensureSchema(): Promise<void> {
     if (this.schemaInitialized) {
+      return;
+    }
+
+    if (!runtimeDdlEnabled()) {
+      await requirePublicTables(this.db, [INTELLIGENCE_TABLE, CONTRASTIVE_TABLE]);
+      this.schemaInitialized = true;
       return;
     }
 
