@@ -115,7 +115,7 @@ test('every method a kernel class marks idempotent exists on that class', () => 
     const names = (owner as unknown as { idempotentMethods?: readonly string[] }).idempotentMethods ?? [];
     assert.ok(names.length > 0, owner.name);
     for (const name of names) {
-      assert.equal(typeof (owner.prototype as Record<string, unknown>)[name], 'function', `${owner.name}.${name}`);
+      assert.equal(typeof (owner.prototype as unknown as Record<string, unknown>)[name], 'function', `${owner.name}.${name}`);
     }
   }
 });
