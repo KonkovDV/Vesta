@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.3
+
+- `follow-redirects` 1.16.2 (through `@slack/bolt` → `axios`) and `systeminformation` 5.33.19 (through `@opentelemetry/auto-instrumentations-node`). The production audit reported two high advisories in 1.16.1 and 5.33.15 (GHSA-mrwp-f3q8-3g9p, GHSA-3f7j-7jwc-fxfj), so the CI audit step failed on an unchanged tree. Only those two entries of `package-lock.json` moved. `npm audit --omit=dev --audit-level=high` exits 0. Seven moderate advisories remain (`glob`/`minimatch` under `ts-morph` and `gaxios`); their fix is a major `glob`.
+
 ## 2.18.2
 
 - `RedisAdapter.existsMany` answers for each key. It sent one `EXISTS` with all keys, which returns how many exist, and read that count as a bit mask: with `a` and `b` present it answered `[false, true]`. It now sends one `EXISTS` per key on the same connection. MP-K46. `tests/integration/redis-adapter-exists.test.ts`.
