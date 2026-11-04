@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.17.0
+
+- `getCommittedEventsAfter` reports `heldSince`: the timestamp of the oldest committed event it could not return because an older transaction is still open. The query reads one row past the page to see it. MP-K23. `tests/integration/event-commit-order.test.ts`.
+- `SemanticEmbeddingWorker` no longer falls back to a gsn cursor. On a store that cannot read in commit order it logs an error and does not read. It sets `event_consumer_lag_seconds{consumer}` to the age of the oldest committed event it has not processed, including a held one, and to 0 when nothing waits. No kernel consumer reads by gsn now. `getEventsByGsnRange` is marked for diagnostics. `tests/unit/semantic-embedding-worker.test.ts`.
+- `docs/limitations.md` names `idle_in_transaction_session_timeout` as a role setting; this tree does not set it.
+
 ## 2.16.3
 
 - `PostgresAdapter.transaction` runs at the isolation level it was asked for. `SET TRANSACTION ISOLATION LEVEL` was sent before `BEGIN`, where PostgreSQL ignores it, so `SERIALIZABLE` ran at READ COMMITTED. The level is now part of `BEGIN`. The transaction timeout is `SET LOCAL`; a plain `SET` before `BEGIN` stayed on the pooled connection and the next transaction on it inherited the timeout. MP-K45. `tests/integration/postgres-adapter-transaction.test.ts`.

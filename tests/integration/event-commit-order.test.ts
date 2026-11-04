@@ -119,3 +119,44 @@ test('the embedding worker vectorizes a late commit and resumes from its stored 
     await store.close();
   }
 });
+
+test('a page names the oldest committed event that an open transaction holds back', { skip: !baseUrl }, async () => {
+  type Page = { events: Array<{ eventId: string; timestamp: Date }>; cursor: CommitCursor | null; heldSince?: Date };
+  const store = createPostgreSQLEventStore({ connection: { connectionString: url } }) as unknown as {
+    getCommittedEventsAfter(cursor: CommitCursor | null): Promise<Page>;
+    close(): Promise<void>;
+  };
+  const early = new Client({ connectionString: url });
+  const late = new Client({ connectionString: url });
+  await Promise.all([early.connect(), late.connect()]);
+  try {
+    let cursor: CommitCursor | null = null;
+    for (;;) {
+      const page = await store.getCommittedEventsAfter(cursor);
+      if (page.events.length === 0) break;
+      cursor = page.cursor;
+    }
+    const caughtUp = await store.getCommittedEventsAfter(cursor);
+    assert.equal(caughtUp.heldSince, undefined, 'nothing is held yet');
+
+    await early.query('BEGIN');
+    await insert(early, 'hold-open');
+    await late.query('BEGIN');
+    await insert(late, 'hold-committed');
+    await late.query('COMMIT');
+
+    const held = await store.getCommittedEventsAfter(cursor);
+    assert.deepEqual(held.events, []);
+    assert.ok(held.heldSince instanceof Date, 'the committed event behind the open transaction is reported');
+
+    await early.query('COMMIT');
+    const released = await store.getCommittedEventsAfter(cursor);
+    assert.deepEqual(released.events.map((event) => event.eventId).sort(), ['hold-committed', 'hold-open']);
+    assert.equal(released.heldSince, undefined);
+    const committed = released.events.find((event) => event.eventId === 'hold-committed');
+    assert.equal(held.heldSince?.getTime(), committed?.timestamp.getTime());
+  } finally {
+    await Promise.all([early.end(), late.end()]);
+    await store.close();
+  }
+});

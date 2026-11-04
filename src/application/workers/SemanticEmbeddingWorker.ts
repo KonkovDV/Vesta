@@ -6,11 +6,16 @@
  * IEventVectorizer, and writes them back. Runs as a non-blocking background loop
  * that never blocks saveEvents().
  *
- * When the store reads in commit order (ICommitOrderReader), the worker follows a
- * (tx_id, gsn) cursor and keeps it in IConsumerCursorStore after each written
- * batch, so it neither skips an event that committed late (MP-K23) nor starts
- * over after a restart. A store without that reader falls back to a gsn cursor
- * held in memory, which can skip such an event.
+ * The worker reads in commit order (ICommitOrderReader): it follows a (tx_id, gsn)
+ * cursor and keeps it in IConsumerCursorStore after each written batch, so it
+ * neither skips an event that committed late (MP-K23) nor starts over after a
+ * restart. A store that cannot read in commit order is not read at all: a gsn
+ * cursor would skip such an event.
+ *
+ * `event_consumer_lag_seconds{consumer}` is the age of the oldest committed event
+ * the worker has not processed, measured from that event's timestamp. It counts
+ * an event that an open transaction holds back, so a long transaction anywhere in
+ * the cluster shows up as lag. Zero means nothing waits.
  *
  * @since v2.9.0 — Этап 6 (Semantic Event Sourcing)
  * @see PLANS/05_NEXT_PHASES/PROMPT_PHASE_4_SEMANTIC.md
@@ -21,8 +26,16 @@ import type { IEventVectorizer, EventEmbeddingUpdate } from '../../domain/memory
 import {
   isCommitOrderReader,
   type CommitCursor,
+  type CommittedEventsPage,
   type IConsumerCursorStore,
 } from '../../domain/events/commit-order.port';
+import { getOrCreateGauge } from '../../monitoring';
+
+const CONSUMER_LAG_SECONDS = getOrCreateGauge(
+  'event_consumer_lag_seconds',
+  'Age of the oldest committed event a journal consumer has not processed, in seconds; 0 when nothing waits',
+  ['consumer'],
+);
 
 export interface SemanticEmbeddingWorkerOptions {
   /** Batch size for vectorization (default: 20) */
@@ -51,10 +64,10 @@ interface WorkerLogger {
 export class SemanticEmbeddingWorker {
   private timer: ReturnType<typeof setInterval> | null = null;
   private processing = false;
-  private lastProcessedGsn: number | null = null;
   private cursor: CommitCursor | null = null;
   private cursorLoaded = false;
   private _stopped = false;
+  private unsupportedReported = false;
 
   constructor(
     private readonly eventStore: IEventStore,
@@ -75,6 +88,11 @@ export class SemanticEmbeddingWorker {
       return;
     }
 
+    if (!isCommitOrderReader(this.eventStore)) {
+      this.reportUnsupportedStore();
+      return;
+    }
+
     if (!this.vectorizer.isReady) {
       await this.vectorizer.initialize();
     }
@@ -89,7 +107,7 @@ export class SemanticEmbeddingWorker {
     this.logger.info('[SemanticEmbeddingWorker] Started', {
       batchSize: opts.batchSize,
       pollIntervalMs: opts.pollIntervalMs,
-      reader: isCommitOrderReader(this.eventStore) ? 'commit-order' : 'gsn',
+      reader: 'commit-order',
       durableCursor: this.cursorStore !== undefined,
     });
   }
@@ -114,11 +132,17 @@ export class SemanticEmbeddingWorker {
    */
   async tick(): Promise<number> {
     if (this.processing || this._stopped) return 0;
+    if (!isCommitOrderReader(this.eventStore)) {
+      this.reportUnsupportedStore();
+      return 0;
+    }
     this.processing = true;
 
     try {
       const opts = this.getOptions();
-      const { events, next } = await this.readBatch(opts.batchSize);
+      const page = await this.readBatch(opts.batchSize);
+      this.recordLag(page);
+      const { events } = page;
 
       if (events.length === 0) return 0;
 
@@ -136,21 +160,14 @@ export class SemanticEmbeddingWorker {
 
       // Advance only after the embeddings are written: a crash in between repeats
       // the batch, which is harmless because the update is idempotent.
-      if (next !== undefined) {
-        if (next) await this.cursorStore?.saveConsumerCursor(this.consumerName, next);
-        this.cursor = next;
-      } else {
-        const lastEvent = events[events.length - 1];
-        if (lastEvent.gsn !== undefined) {
-          this.lastProcessedGsn = lastEvent.gsn;
-        }
-      }
+      if (page.cursor) await this.cursorStore?.saveConsumerCursor(this.consumerName, page.cursor);
+      this.cursor = page.cursor;
 
       this.logger.info('[SemanticEmbeddingWorker] Batch vectorized', {
         batchSize: events.length,
         durationMs,
         dimension: this.vectorizer.dimensions,
-        ...(next !== undefined ? { cursor: this.cursor } : { lastGsn: this.lastProcessedGsn }),
+        cursor: this.cursor,
       });
 
       return events.length;
@@ -164,17 +181,34 @@ export class SemanticEmbeddingWorker {
     }
   }
 
-  /** `next` is undefined when the store has no commit-order reader. */
-  private async readBatch(limit: number): Promise<{ events: DomainEvent[]; next?: CommitCursor | null }> {
-    if (!isCommitOrderReader(this.eventStore)) {
-      return { events: await this.eventStore.getEventsByGsnRange(this.lastProcessedGsn, limit) };
-    }
+  private async readBatch(limit: number): Promise<CommittedEventsPage> {
+    const reader = this.eventStore as IEventStore & {
+      getCommittedEventsAfter: (cursor: CommitCursor | null, limit?: number) => Promise<CommittedEventsPage>;
+    };
     if (!this.cursorLoaded) {
       this.cursor = (await this.cursorStore?.loadConsumerCursor(this.consumerName)) ?? null;
       this.cursorLoaded = true;
     }
-    const page = await this.eventStore.getCommittedEventsAfter(this.cursor, limit);
-    return { events: page.events, next: page.cursor };
+    return reader.getCommittedEventsAfter(this.cursor, limit);
+  }
+
+  /** The first returned event is the oldest unprocessed one; a held event waits behind it. */
+  private recordLag(page: CommittedEventsPage): void {
+    const oldest = page.events[0]?.timestamp ?? page.heldSince;
+    const ageMs = oldest ? Date.now() - new Date(oldest).getTime() : 0;
+    try {
+      CONSUMER_LAG_SECONDS.set({ consumer: this.consumerName }, Math.max(0, ageMs) / 1000);
+    } catch {
+      // Metrics must never stop the worker.
+    }
+  }
+
+  private reportUnsupportedStore(): void {
+    if (this.unsupportedReported) return;
+    this.unsupportedReported = true;
+    this.logger.error(
+      '[SemanticEmbeddingWorker] Not started: the event store cannot read in commit order, and a gsn cursor skips an event that commits late (MP-K23)',
+    );
   }
 
   private get consumerName(): string {
