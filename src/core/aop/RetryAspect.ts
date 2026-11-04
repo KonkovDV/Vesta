@@ -19,15 +19,22 @@ const TRANSIENT_CODES = new Set([
 const TRANSIENT_STATUS = new Set([408, 425, 429, 502, 503, 504]);
 
 /**
- * Method names that read. Only these are repeated by default: an aspect cannot
+ * A method is repeated only when its owner marks it idempotent. An aspect cannot
  * know whether a write (a payment, a tool body, a message) already reached the
- * other side before the error, and a repeat would perform it twice.
- * check/load/fetch/is are left out on purpose: RateLimitService.checkLimit
- * consumes a token, and several load and fetch methods write a cache row. A name is
- * a hint, not a guarantee; a method that must be repeated should say so
- * (retryable: true on the error, or a custom `retryable` rule).
+ * other side before the error, and a repeat would perform it twice. A name does not
+ * tell either: the audit found 32 methods named like reads that write (V-03).
+ *
+ * Two ways to mark, both checked here:
+ * - the class lists the method: `static readonly idempotentMethods = ['listTags']`;
+ * - the registration says so: `aspectOptions.methodMetadata.<method>.metadata.idempotent = true`
+ *   for one method, or `aspectOptions.metadata.idempotent = true` for a service that only reads.
  */
-const READ_ONLY_METHOD = /^(get|find|list|read|search|query|count|exists|has|lookup|describe|stat|ping|health)(?![a-z])/;
+export function isMarkedIdempotent(context: AroundAdviceContext): boolean {
+  if (context.joinPoint?.metadata?.idempotent === true) return true;
+  const owner = (context.target as { constructor?: { idempotentMethods?: unknown } } | undefined)?.constructor;
+  const marked = owner?.idempotentMethods;
+  return Array.isArray(marked) && marked.includes(context.methodName);
+}
 
 export function isTransientError(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
@@ -40,9 +47,9 @@ export function isTransientError(error: unknown): boolean {
   return record.cause !== undefined && record.cause !== error ? isTransientError(record.cause) : false;
 }
 
-/** Default rule: a transient failure of a read-only method. */
+/** Default rule: a transient failure of a method marked idempotent. Nothing else is repeated. */
 export function defaultRetryable(error: unknown, context: AroundAdviceContext): boolean {
-  return READ_ONLY_METHOD.test(context.methodName) && isTransientError(error);
+  return isMarkedIdempotent(context) && isTransientError(error);
 }
 
 export class RetryAspect implements Aspect {

@@ -41,6 +41,12 @@ type RegistryJsonResponse<T> = {
 };
 
 export class ContainerRegistryAdapter implements IContainerRegistryClient {
+  /**
+   * Registry GETs: repeating one after a transient failure changes nothing remote.
+   * RetryAspect repeats only methods listed here or marked at registration.
+   */
+  static readonly idempotentMethods: readonly string[] = ['listTags', 'getSourceUrl'];
+
   private readonly tokenCache = new Map<string, TokenCacheEntry>();
   private readonly sourceUrlCache = new Map<string, string | null>();
   private readonly releaseTagPrefixCache = new Map<string, string>();

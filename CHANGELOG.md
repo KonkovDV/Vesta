@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.0
+
+- `RetryAspect` repeats a method only when the method is marked idempotent, and only after a transient error. The class lists it in `static readonly idempotentMethods`, or the registration sets `idempotent: true` in `aspectOptions.metadata` or `aspectOptions.methodMetadata.<method>.metadata`. A read-looking name (`get*`, `find*`, `list*`, ...) no longer counts: the audit found 32 such methods that write. This also applies to project classes named `*Adapter`, `*Repository`, or `*HttpClient`. `ContainerRegistryAdapter.listTags` and `getSourceUrl` are marked; nothing else in this tree is. V-03, MP-K13. `tests/unit/retry-aspect.test.ts`, `docs/extensions.md`.
+
 ## 2.17.0
 
 - `getCommittedEventsAfter` reports `heldSince`: the timestamp of the oldest committed event it could not return because an older transaction is still open. The query reads one row past the page to see it. MP-K23. `tests/integration/event-commit-order.test.ts`.
