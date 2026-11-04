@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.18.2
+
+- `RedisAdapter.existsMany` answers for each key. It sent one `EXISTS` with all keys, which returns how many exist, and read that count as a bit mask: with `a` and `b` present it answered `[false, true]`. It now sends one `EXISTS` per key on the same connection. MP-K46. `tests/integration/redis-adapter-exists.test.ts`.
+
 ## 2.18.1
 
 - `StructuredLogger` writes only records at or above `LOG_LEVEL`. Without it, or with another value, the default is debug outside production and info in production, as in `PinoLoggerAdapter`. An error is always written. MP-K25. `tests/unit/structured-logger-level.test.ts`.
