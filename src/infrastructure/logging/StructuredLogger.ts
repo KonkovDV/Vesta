@@ -15,6 +15,31 @@ type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 type JsonObject = { [key: string]: unknown };
 
+const LEVEL_RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
+
+let thresholdKey: string | undefined;
+let thresholdRank = LEVEL_RANK.info;
+
+/**
+ * Lowest level that is written (MP-K25). LOG_LEVEL wins; without it, or with an
+ * unknown value, debug is written outside production and info in production, as
+ * in PinoLoggerAdapter. Read on each record so a later .env load still applies;
+ * the parse runs only when the value changes.
+ */
+function minimumRank(): number {
+  const raw = process.env.LOG_LEVEL;
+  const env = process.env.NODE_ENV;
+  const key = `${raw ?? ''}|${env ?? ''}`;
+  if (key !== thresholdKey) {
+    thresholdKey = key;
+    const named = (raw ?? '').trim().toLowerCase();
+    thresholdRank = named in LEVEL_RANK
+      ? LEVEL_RANK[named as LogLevel]
+      : env === 'production' ? LEVEL_RANK.info : LEVEL_RANK.debug;
+  }
+  return thresholdRank;
+}
+
 export type ErrorCaptureKind = 'logger' | 'uncaughtException' | 'unhandledRejection' | 'external';
 
 type SerializedError = {
@@ -114,6 +139,10 @@ export class StructuredLogger implements ILogger {
     error: Error | undefined,
     meta: JsonObject | undefined,
   ): void {
+    // An error is always written: the capture sink and stderr must see it.
+    if (level !== 'error' && LEVEL_RANK[level] < minimumRank()) {
+      return;
+    }
     const record = this.buildRecord(level, message, error, meta);
     const json = JSON.stringify(record);
     const line = `${json}\n`;
@@ -232,10 +261,10 @@ export class StructuredLogger implements ILogger {
       error.name = nameValue;
     }
 
+    // new Error() records where the logger is; that is not where anything failed.
+    // Keep the caller's stack, or none: LoggingAspect drops it for a 4xx on purpose.
     const stackValue = value.stack;
-    if (typeof stackValue === 'string' && stackValue.length > 0) {
-      error.stack = stackValue;
-    }
+    error.stack = typeof stackValue === 'string' && stackValue.length > 0 ? stackValue : undefined;
     return error;
   }
 

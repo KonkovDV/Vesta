@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.18.1
+
+- `StructuredLogger` writes only records at or above `LOG_LEVEL`. Without it, or with another value, the default is debug outside production and info in production, as in `PinoLoggerAdapter`. An error is always written. MP-K25. `tests/unit/structured-logger-level.test.ts`.
+- An error-like object without a stack is logged without one. The logger gave it a new stack that pointed at the logger itself, so a 401 still logged a stack after `LoggingAspect` dropped it. On the routes gate, a 401 cost 1752 bytes of log before this cut, 581 with `LOG_LEVEL=info`, and 829 without `LOG_LEVEL` in development.
+
 ## 2.18.0
 
 - `RetryAspect` repeats a method only when the method is marked idempotent, and only after a transient error. The class lists it in `static readonly idempotentMethods`, or the registration sets `idempotent: true` in `aspectOptions.metadata` or `aspectOptions.methodMetadata.<method>.metadata`. A read-looking name (`get*`, `find*`, `list*`, ...) no longer counts: the audit found 32 such methods that write. This also applies to project classes named `*Adapter`, `*Repository`, or `*HttpClient`. `ContainerRegistryAdapter.listTags` and `getSourceUrl` are marked; nothing else in this tree is. V-03, MP-K13. `tests/unit/retry-aspect.test.ts`, `docs/extensions.md`.
