@@ -4,6 +4,7 @@
  */
 
 import { BaseIntegrityCheck, CheckResult } from '../system-integrity-checker';
+import { randomUUID } from 'crypto';
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
@@ -116,11 +117,12 @@ export class FileSystemCheck extends BaseIntegrityCheck {
         readable = true; // Not required, mark as ok
       }
 
-      // Check writability
+      // Check writability. The probe name is unique per call: processes that start
+      // in the same directory at the same millisecond must not unlink each other's probe.
       if (req.writable) {
         try {
-          const testFile = path.join(req.path, `.write-test-${Date.now()}`);
-          await fs.writeFile(testFile, '');
+          const testFile = path.join(req.path, `.write-test-${process.pid}-${randomUUID()}`);
+          await fs.writeFile(testFile, '', { flag: 'wx' });
           await fs.unlink(testFile);
           writable = true;
         } catch {

@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.16.1
+
+- Processes that start in one working directory no longer fail the critical filesystem check against each other. The write probe was named by `Date.now()`: two starts in the same millisecond wrote one file, one unlinked it, and the other reported the directory as not writable. One of 20 parallel boots on one database stopped that way. The probe now carries the pid and a random UUID and is created with `wx`. MP-K43. `tests/unit/filesystem-check.test.ts`.
+
 ## 2.16.0
 
 - `003_skill_graph_finops.sql` creates the four `skill_*` tables, their three indexes, the `finops` schema, and `finops.agent_spend_state`. `001` and `002` are unchanged, so a database that applied them accepts this file. With `DB_RUNTIME_DDL` unset, the skill relation graph, the finops spend store, the feature-flag store, and the MAS read models check their tables and do not create them; the last two use tables `001_consolidated.sql` already has. Before this cut, the first use of those four stores on a migrated database sent 15 DDL commands. An event trigger on `ddl_command_start` now records none from any kernel store. MP-K24. `tests/integration/runtime-tables.test.ts`, `tests/unit/runtime-ddl.test.ts`.
