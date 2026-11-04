@@ -3,6 +3,7 @@ import { getConfig } from '../../config';
 import { tryJsonParse } from '../../core/utils/json';
 import type { MasRedisStreamsClient, MasStreamEntry } from './MasRedisStreamsClient';
 import type { IStructuredLogger } from '../../core/logging/IStructuredLogger';
+import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
 
 export interface MasEventsRedisStreamsProjectorOptions {
   groupName?: string;
@@ -31,15 +32,27 @@ export class MasReadModelsRepository {
     this.taskStatsTable = `${this.schema}.mas_task_stats_read_model`;
   }
 
+  /**
+   * Both tables are in 001_consolidated.sql. Without DB_RUNTIME_DDL=true this only
+   * checks that they exist and throws "Apply migrations" otherwise.
+   */
   async initialize(): Promise<void> {
+    if (!runtimeDdlEnabled()) {
+      await requireQualifiedTables(
+        (sql, params) => this.db.query<{ schema_name: string; table_name: string }>(sql, params),
+        [this.sessionTable, this.taskStatsTable],
+      );
+      return;
+    }
+
     // Schema
     await this.db.execute(`CREATE SCHEMA IF NOT EXISTS ${this.schema}`);
 
-    // MAS Session Read Model (see T010_cqrs_read_models)
+    // MAS Session Read Model. Ids are text, as in the baseline: events carry ids such as tenant-1.
     await this.db.execute(`
       CREATE TABLE IF NOT EXISTS ${this.sessionTable} (
-        mas_session_id UUID PRIMARY KEY,
-        tenant_id UUID NOT NULL,
+        mas_session_id TEXT PRIMARY KEY,
+        tenant_id TEXT NOT NULL,
         scenario_id TEXT,
         status VARCHAR(32) NOT NULL,
         started_at TIMESTAMPTZ NOT NULL,
@@ -59,7 +72,7 @@ export class MasReadModelsRepository {
     // MAS Task Stats Read Model (see T010_cqrs_read_models)
     await this.db.execute(`
       CREATE TABLE IF NOT EXISTS ${this.taskStatsTable} (
-        tenant_id UUID NOT NULL,
+        tenant_id TEXT NOT NULL,
         scenario_id TEXT NOT NULL,
         window_start TIMESTAMPTZ NOT NULL,
         window_end TIMESTAMPTZ NOT NULL,

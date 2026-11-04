@@ -10,6 +10,7 @@ import type { IFeatureFlagsStore } from '../../domain/feature-flags/IFeatureFlag
 import type { FeatureFlags } from '../../core/config/feature-flags';
 import type { IDatabaseConnection } from '../../domain/persistence/IDatabaseConnection';
 import { safeJsonParse } from '../../core/utils/json';
+import { requirePublicTables, runtimeDdlEnabled } from '../database/runtime-ddl';
 
 const FEATURE_FLAGS_DB_TABLE = 'app_feature_flags';
 const FEATURE_FLAGS_DB_ROW_ID = 'default';
@@ -59,14 +60,18 @@ export class PostgresFeatureFlagsStore implements IFeatureFlagsStore {
   }
 
   /**
-   * Обеспечивает наличие таблицы конфигурации флагов.
-   *
-   * Это каноническое место определения DDL для таблицы `app_feature_flags` в архитектуре.
-   * Таблица создаётся лениво при первом доступе к store; в production-средах
-   * рекомендуется использовать миграции для предварительного создания схемы.
+   * Таблица `app_feature_flags` создаётся миграцией `001_consolidated.sql`.
+   * Без DB_RUNTIME_DDL=true store только проверяет, что таблица есть,
+   * и иначе бросает «Apply migrations». С флагом шлёт прежний CREATE TABLE IF NOT EXISTS.
    */
   private async ensureSchema(): Promise<void> {
     if (this.dbSchemaInitialized) {
+      return;
+    }
+
+    if (!runtimeDdlEnabled()) {
+      await requirePublicTables(this.db, [FEATURE_FLAGS_DB_TABLE]);
+      this.dbSchemaInitialized = true;
       return;
     }
 

@@ -4,7 +4,8 @@
  * Implements ISpendStateStore using IDatabaseConnection (JSONB columns).
  * Used by DurableTokenomicsDecorator to survive service restarts.
  *
- * Table: finops.agent_spend_state (auto-created via ensureTable).
+ * Table: finops.agent_spend_state, created by 003_skill_graph_finops.sql.
+ * ensureTable() checks it; it sends CREATE only when DB_RUNTIME_DDL=true.
  *
  * @layer Infrastructure
  * @phase Horizon 2.2 — FinOps for AI Agents (Durability Extension)
@@ -16,6 +17,9 @@ import type {
   AgentSpendState,
   TokenomicsBudgetPolicy,
 } from '../../domain/finops/ITokenomicsController';
+import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
+
+const SPEND_STATE_TABLE = 'finops.agent_spend_state';
 
 // ── DB row shape ───────────────────────────────────────────────────
 
@@ -75,6 +79,15 @@ export class PostgresSpendStateStore implements ISpendStateStore {
 
   private async ensureTable(): Promise<void> {
     if (this.tableEnsured) return;
+
+    if (!runtimeDdlEnabled()) {
+      await requireQualifiedTables(
+        (sql, params) => this.db.query<{ schema_name: string; table_name: string }>(sql, params),
+        [SPEND_STATE_TABLE],
+      );
+      this.tableEnsured = true;
+      return;
+    }
 
     await this.db.query('CREATE SCHEMA IF NOT EXISTS finops');
     await this.db.query(`

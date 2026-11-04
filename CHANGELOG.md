@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.16.0
+
+- `003_skill_graph_finops.sql` creates the four `skill_*` tables, their three indexes, the `finops` schema, and `finops.agent_spend_state`. `001` and `002` are unchanged, so a database that applied them accepts this file. With `DB_RUNTIME_DDL` unset, the skill relation graph, the finops spend store, the feature-flag store, and the MAS read models check their tables and do not create them; the last two use tables `001_consolidated.sql` already has. Before this cut, the first use of those four stores on a migrated database sent 15 DDL commands. An event trigger on `ddl_command_start` now records none from any kernel store. MP-K24. `tests/integration/runtime-tables.test.ts`, `tests/unit/runtime-ddl.test.ts`.
+- With `DB_RUNTIME_DDL=true` the MAS read models are created with text ids, as in the baseline. They were `uuid`, which rejects ids such as `tenant-1`.
+
 ## 2.15.0
 
 - `runKernel()` no longer mounts `/api/mcp` after the 404 handler. That mount logged success and answered 404. A product calls `mountMcpHttp` from extension `routes`, which runs before the 404 handler. A request without a key answers 401. The tool-policy agent id stays `mcp-http-client` when the URL says `researcher-x`. MP-K31. `tests/unit/mcp-http-mount.test.ts`.

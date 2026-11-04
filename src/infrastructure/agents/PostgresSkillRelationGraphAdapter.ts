@@ -8,7 +8,8 @@
  * - Recursive CTEs for BFS path finding with cycle detection via `NOT target = ANY(path)`
  * - Multiplicative confidence decay across edges (§3.5 Skill Connection)
  * - Symmetric storage for similar_to (both directions inserted/deleted atomically)
- * - Auto-migration via `ensureSchema()` — idempotent CREATE TABLE IF NOT EXISTS
+ * - Tables come from 003_skill_graph_finops.sql. `ensureSchema()` checks them;
+ *   it sends CREATE TABLE IF NOT EXISTS only when DB_RUNTIME_DDL=true.
  *
  * @layer Infrastructure (Agents)
  * @pattern CC-037 Skill Relation Graph (FITNESS-K: 79)
@@ -33,6 +34,9 @@ import type {
 } from '../../domain/agents/ISkillRelationGraph';
 import { logger } from '../logging/logger';
 import { getOrCreateCounter, getOrCreateHistogram } from '../../monitoring';
+import { requirePublicTables, runtimeDdlEnabled } from '../database/runtime-ddl';
+
+const SKILL_GRAPH_TABLES = ['skill_relations', 'skill_taxonomy', 'skill_divisions', 'skill_division_members'];
 
 // ── Metrics ────────────────────────────────────────────────────────
 
@@ -97,7 +101,8 @@ export class PostgresSkillRelationGraphAdapter implements ISkillRelationGraph {
   // ── Schema Migration ──────────────────────────────────────────────
 
   /**
-   * Idempotent schema creation. Called lazily on first operation.
+   * Called lazily on first operation. Without DB_RUNTIME_DDL=true it only checks
+   * that the migrated tables exist and throws "Apply migrations" otherwise.
    */
   async ensureSchema(): Promise<void> {
     if (this.schemaEnsured) return;
@@ -105,6 +110,13 @@ export class PostgresSkillRelationGraphAdapter implements ISkillRelationGraph {
     const started = process.hrtime.bigint();
 
     try {
+      if (!runtimeDdlEnabled()) {
+        await requirePublicTables(this.db, SKILL_GRAPH_TABLES);
+        this.schemaEnsured = true;
+        this.observe('ensureSchema', 'success', started);
+        return;
+      }
+
       await this.db.execute(`
         CREATE TABLE IF NOT EXISTS skill_relations (
           id SERIAL PRIMARY KEY,
