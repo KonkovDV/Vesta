@@ -186,6 +186,16 @@ DROP TABLE IF EXISTS ${'${schema}'}.${'${outboxTable}'} CASCADE;
 DROP TABLE IF EXISTS ${'${schema}'}.${'${dlqTable}'} CASCADE;
 `;
 
+/**
+ * Queues every writer of one aggregate until the caller's transaction ends.
+ * The outbox takes this lock before it numbers events. A repository that takes it
+ * before reading its own version sees the latest committed state; the second
+ * request from the same session succeeds at once.
+ */
+export async function lockAggregateForWrite(client: PoolClient, aggregateId: string): Promise<void> {
+  await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [aggregateId]);
+}
+
 interface OutboxRow {
   message_id: string;
   event_id: string;
@@ -1284,7 +1294,7 @@ export class PostgreSQLOutbox implements IOutbox {
         const aggregateIds = [...new Set(events.map((event) => event.aggregateId))].sort();
         await aggregateIds.reduce<Promise<void>>(async (previous, aggregateId) => {
           await previous;
-          await client.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [aggregateId]);
+          await lockAggregateForWrite(client, aggregateId);
         }, Promise.resolve());
         if (expected !== undefined) {
           const current = await client.query(

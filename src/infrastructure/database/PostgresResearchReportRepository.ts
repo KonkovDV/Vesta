@@ -21,7 +21,7 @@ import type { IOutbox } from '../../domain/events/outbox.interface';
 import type { IEventStore } from '../../domain/events/event-store.interface';
 import { DomainEvent as StoreEvent } from '../../domain/events/event-store.interface';
 import type { ResearchDomainEvent } from '../../domain/research/events';
-import { PostgreSQLOutbox } from '../events/postgres-outbox';
+import { PostgreSQLOutbox, lockAggregateForWrite } from '../events/postgres-outbox';
 import { requireActivePgClient } from './PostgresAdapter';
 import type { PoolClient } from 'pg';
 
@@ -218,6 +218,11 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
         const client: PoolClient = requireActivePgClient(
           'PostgresResearchReportRepository.save',
         );
+
+        // Writers of one report queue here until the first commits (MP-K40).
+        // Without the lock two saves read the same version, both passed the check,
+        // and the outbox numbered the second batch after the first.
+        await lockAggregateForWrite(client, report.id.toValue());
 
         // Проверяем версию для optimistic locking в рамках того же клиента.
         const versionResult = await client.query<{ version: number }>(

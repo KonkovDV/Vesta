@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.16.2
+
+- Two saves of one conversation or one research report at the same version no longer both commit. Each repository compared the read-model version, but both transactions could read it before either committed; the second then overwrote the read model, and the outbox numbered its events after the first writer's. In ten concurrent pairs, every pair committed twice. The repositories now take the aggregate's transaction lock, the one the outbox takes before it numbers events, before they read the version. Now exactly one save of each pair commits and the other returns `CONFLICT`. `PostgresUnitOfWork` is unchanged. MP-K40. `tests/integration/repository-version-race.test.ts`.
+- `PostgresResearchReportRepository.findById` always fails; recorded as MP-K44. The race test loads reports with `rehydrate`.
+
 ## 2.16.1
 
 - Processes that start in one working directory no longer fail the critical filesystem check against each other. The write probe was named by `Date.now()`: two starts in the same millisecond wrote one file, one unlinked it, and the other reported the directory as not writable. One of 20 parallel boots on one database stopped that way. The probe now carries the pid and a random UUID and is created with `wx`. MP-K43. `tests/unit/filesystem-check.test.ts`.
