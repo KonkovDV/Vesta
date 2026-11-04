@@ -1,5 +1,9 @@
 # Changelog
 
+## 2.16.3
+
+- `PostgresAdapter.transaction` runs at the isolation level it was asked for. `SET TRANSACTION ISOLATION LEVEL` was sent before `BEGIN`, where PostgreSQL ignores it, so `SERIALIZABLE` ran at READ COMMITTED. The level is now part of `BEGIN`. The transaction timeout is `SET LOCAL`; a plain `SET` before `BEGIN` stayed on the pooled connection and the next transaction on it inherited the timeout. MP-K45. `tests/integration/postgres-adapter-transaction.test.ts`.
+
 ## 2.16.2
 
 - Two saves of one conversation or one research report at the same version no longer both commit. Each repository compared the read-model version, but both transactions could read it before either committed; the second then overwrote the read model, and the outbox numbered its events after the first writer's. In ten concurrent pairs, every pair committed twice. The repositories now take the aggregate's transaction lock, the one the outbox takes before it numbers events, before they read the version. Now exactly one save of each pair commits and the other returns `CONFLICT`. `PostgresUnitOfWork` is unchanged. MP-K40. `tests/integration/repository-version-race.test.ts`.

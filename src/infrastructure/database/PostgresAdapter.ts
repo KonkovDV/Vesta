@@ -437,6 +437,10 @@ export class PostgresAdapter implements IDatabaseConnection {
     };
 
     try {
+      // The isolation level and the timeout belong to this transaction (MP-K45).
+      // SET TRANSACTION before BEGIN has no effect, and a plain SET before BEGIN
+      // stays on the pooled connection for whoever borrows it next.
+      let begin = 'BEGIN';
       if (options?.isolationLevel) {
         const isolationMap: Record<NonNullable<TransactionOptions['isolationLevel']>, string> = {
           READ_UNCOMMITTED: 'READ UNCOMMITTED',
@@ -446,7 +450,7 @@ export class PostgresAdapter implements IDatabaseConnection {
         };
         const level = isolationMap[options.isolationLevel];
         if (level) {
-          await client.query(`SET TRANSACTION ISOLATION LEVEL ${level}`);
+          begin = `BEGIN ISOLATION LEVEL ${level}`;
         }
       }
 
@@ -454,16 +458,16 @@ export class PostgresAdapter implements IDatabaseConnection {
         options?.timeoutMs,
         'PostgresAdapter.transaction.timeoutMs',
       );
-      if (typeof timeoutMs === 'number') {
-        await client.query(`SET statement_timeout = ${timeoutMs}`);
-      }
 
       // A-016: Check abort before BEGIN
       if (transactionAborted || options?.signal?.aborted) {
         throw new Error(`Transaction aborted before BEGIN: ${options?.signal?.reason}`);
       }
 
-      await client.query('BEGIN');
+      await client.query(begin);
+      if (typeof timeoutMs === 'number') {
+        await client.query(`SET LOCAL statement_timeout = ${timeoutMs}`);
+      }
 
       // A-016: Setup abort handler after transaction starts
       setupAbortHandler();
