@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.2.0
+
+- Typed DI tokens (T2.3, step 1). `InjectionToken<T>` is a string or symbol that names the type it resolves to; `createToken<T>(name)` makes one, `container.inject(token)` returns that type without a type argument, `container.provide(token, factory)` checks what the factory returns. At run time a token is the same string, so typed and string calls share one registration and modules can move one at a time. `KernelTokens` types seven public ports. The package root exports `createToken`, `InjectionToken`, `TokenType`, and `KernelTokens`. The guarded extension container treats `provide` like `register`. `npm run typecheck` compiles `src/core/di/injection-token.typecheck.ts`, where a wrong type, a wrong factory, and a bare string must stay compile errors. CI fails when `resolve()` calls with a string literal in `src` exceed 204. MP-K48. `tests/unit/injection-token.test.ts`.
+
 ## 4.1.0
 
 - `OutboxSaveOptions.expectedAggregateVersions`: one batch checks an expected version for each listed aggregate under its lock, then writes every event, or throws `ConcurrencyError` and writes none. This is a multi-stream append with an expected revision per stream, as KurrentDB 25.1 added. `PostgresUnitOfWork` uses it: an aggregate whose events carry versions from 1 up without a gap must find the journal at the first version minus one. Before, two units of work decided on one version both committed, and a conflict on one aggregate did not stop the others. Events with version 0 are still appended after the head. MP-K40. `tests/integration/unit-of-work-versions.test.ts`, `tests/unit/unit-of-work-heads.test.ts`.

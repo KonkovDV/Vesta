@@ -1,0 +1,4 @@
+{
+  "description": "Ceiling of resolve() calls with a string literal token in src (T2.3), counted by scripts/ci-di-literals.cjs. A typed token replaces one; lower this number when the gate says it can shrink. Measured 2026-11-05: 204.",
+  "max": 204
+}

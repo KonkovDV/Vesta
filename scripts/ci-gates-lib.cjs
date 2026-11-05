@@ -104,7 +104,15 @@ function applyGateEnv(overrides) {
   for (const [key, value] of Object.entries(overrides || {})) process.env[key] = value;
 }
 
+/** resolve('Name') or resolve<T>('Name'): a token the compiler cannot check (T2.3). */
+const STRING_RESOLVE = /\.resolve(?:<[^()]*>)?\(\s*['"`]/g;
+
+function countStringResolves(source) {
+  return (String(source).match(STRING_RESOLVE) || []).length;
+}
+
 module.exports = {
+  countStringResolves,
   installRoutePathCapture,
   joinRoute,
   walkExpressStack,

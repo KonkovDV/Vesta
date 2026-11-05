@@ -36,6 +36,8 @@ jobs:
         env:
           PUPPETEER_SKIP_DOWNLOAD: "1"
       - run: npm run typecheck
+      - name: String DI tokens may only decrease (T2.3)
+        run: node scripts/ci-di-literals.cjs
       - run: npm test
       - run: npm run build
       - name: Public import surface
