@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.1.0
+
+- `OutboxSaveOptions.expectedAggregateVersions`: one batch checks an expected version for each listed aggregate under its lock, then writes every event, or throws `ConcurrencyError` and writes none. This is a multi-stream append with an expected revision per stream, as KurrentDB 25.1 added. `PostgresUnitOfWork` uses it: an aggregate whose events carry versions from 1 up without a gap must find the journal at the first version minus one. Before, two units of work decided on one version both committed, and a conflict on one aggregate did not stop the others. Events with version 0 are still appended after the head. MP-K40. `tests/integration/unit-of-work-versions.test.ts`, `tests/unit/unit-of-work-heads.test.ts`.
+
 ## 4.0.1
 
 - `PostgresResearchReportRepository.findById` and `find` rebuild each report from the journal. Both called `restoreFromHistory` with no events, which throws, so they returned `CONNECTION_ERROR` for every saved report. MP-K44. `tests/integration/repository-version-race.test.ts`.

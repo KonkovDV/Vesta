@@ -1281,9 +1281,13 @@ export class PostgreSQLOutbox implements IOutbox {
   ): Promise<OutboxMessage[]> {
     const maxAttempts = 5;
     const versionCache = new Map<string, number>();
-    const expected = options?.expectedAggregateVersion;
-    if (expected !== undefined && new Set(events.map((event) => event.aggregateId)).size !== 1) {
-      throw new Error('expectedAggregateVersion needs events of exactly one aggregate');
+    const expected = new Map<string, number>(Object.entries(options?.expectedAggregateVersions ?? {}));
+    const single = options?.expectedAggregateVersion;
+    if (single !== undefined) {
+      if (new Set(events.map((event) => event.aggregateId)).size !== 1) {
+        throw new Error('expectedAggregateVersion needs events of exactly one aggregate');
+      }
+      expected.set(events[0].aggregateId, single);
     }
 
     const attemptWrite = async (attempt: number): Promise<OutboxMessage[]> => {
@@ -1297,19 +1301,24 @@ export class PostgreSQLOutbox implements IOutbox {
           await previous;
           await lockAggregateForWrite(client, aggregateId);
         }, Promise.resolve());
-        if (expected !== undefined) {
-          const current = await client.query(
-            `SELECT COALESCE(MAX(aggregate_version), 0) AS v
+        if (expected.size > 0) {
+          // Every listed aggregate is checked under its lock before anything is written.
+          const current = await client.query<{ aggregate_id: string; v: string | number }>(
+            `SELECT aggregate_id, COALESCE(MAX(aggregate_version), 0) AS v
                FROM ${this.eventStoreSchema}.${this.eventStoreEventsTable}
-              WHERE aggregate_id = $1`,
-            [events[0].aggregateId],
+              WHERE aggregate_id = ANY($1::text[])
+              GROUP BY aggregate_id`,
+            [[...expected.keys()]],
           );
-          const actual = Number(current.rows[0]?.v ?? 0);
-          if (actual !== expected) {
-            throw new ConcurrencyError(
-              `Aggregate ${events[0].aggregateId} version conflict: expected ${expected}, actual ${actual}`,
-              { metadata: { aggregateId: events[0].aggregateId, expectedVersion: expected, actualVersion: actual } },
-            );
+          const stored = new Map(current.rows.map((row) => [row.aggregate_id, Number(row.v)]));
+          for (const [aggregateId, expectedVersion] of expected) {
+            const actual = stored.get(aggregateId) ?? 0;
+            if (actual !== expectedVersion) {
+              throw new ConcurrencyError(
+                `Aggregate ${aggregateId} version conflict: expected ${expectedVersion}, actual ${actual}`,
+                { metadata: { aggregateId, expectedVersion, actualVersion: actual } },
+              );
+            }
           }
         }
         const prepared = await events.reduce<Promise<Array<{ event: DomainEvent; version: number }>>>(
@@ -1398,11 +1407,12 @@ export class PostgreSQLOutbox implements IOutbox {
         if (error instanceof ConcurrencyError) {
           throw error;
         }
-        if (pgError?.code === '23505' && expected !== undefined) {
+        if (pgError?.code === '23505' && expected.size > 0) {
           // Re-numbering after a concurrent write would commit a decision made on old state.
+          const [aggregateId, expectedVersion] = [...expected.entries()][0];
           throw new ConcurrencyError(
-            `Aggregate ${events[0].aggregateId} version conflict: another writer appended`,
-            { metadata: { aggregateId: events[0].aggregateId, expectedVersion: expected } },
+            `Aggregate ${aggregateId} version conflict: another writer appended`,
+            { metadata: { aggregateId, expectedVersion } },
           );
         }
         if (pgError?.code === '23505' && attempt < maxAttempts - 1) {
