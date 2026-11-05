@@ -998,6 +998,19 @@ export function createRedisEventBus(config: RedisEventBusConfig): RedisEventBus 
 }
 
 /**
+ * A size or count setting: unset or empty means the default; anything but a positive
+ * integer stops the start. `Number('10k')` is NaN, and Redis then refuses every XADD.
+ */
+export function positiveIntSetting(name: string, raw: string | undefined): number | undefined {
+  const value = (raw ?? '').trim();
+  if (value === '') return undefined;
+  if (!/^[0-9]+$/.test(value) || Number(value) <= 0 || !Number.isSafeInteger(Number(value))) {
+    throw new Error(`${name} must be a positive integer, got "${raw}"`);
+  }
+  return Number(value);
+}
+
+/**
  * Создать Event Bus из переменных окружения
  */
 export function createRedisEventBusFromEnv(): IEventBus {
@@ -1011,12 +1024,15 @@ export function createRedisEventBusFromEnv(): IEventBus {
         port: base.connection.port,
         password: base.connection.password,
         db: base.connection.db,
+        tls: base.connection.tls,
       },
       keyPrefix: base.keyPrefix,
       groupName: env.EVENT_BUS_STREAM_GROUP,
-      maxLen: env.EVENT_BUS_STREAM_MAXLEN ? Number(env.EVENT_BUS_STREAM_MAXLEN) : undefined,
-      maxDeliveries: env.EVENT_BUS_STREAM_MAX_DELIVERIES ? Number(env.EVENT_BUS_STREAM_MAX_DELIVERIES) : undefined,
-      minIdleMs: env.EVENT_BUS_STREAM_MIN_IDLE_MS ? Number(env.EVENT_BUS_STREAM_MIN_IDLE_MS) : undefined,
+      maxLen: positiveIntSetting('EVENT_BUS_STREAM_MAXLEN', env.EVENT_BUS_STREAM_MAXLEN),
+      hardMaxLen: positiveIntSetting('EVENT_BUS_STREAM_HARD_MAXLEN', env.EVENT_BUS_STREAM_HARD_MAXLEN),
+      maxDeliveries: positiveIntSetting('EVENT_BUS_STREAM_MAX_DELIVERIES', env.EVENT_BUS_STREAM_MAX_DELIVERIES),
+      minIdleMs: env.EVENT_BUS_STREAM_MIN_IDLE_MS?.trim() === '0' ? 0 : positiveIntSetting('EVENT_BUS_STREAM_MIN_IDLE_MS', env.EVENT_BUS_STREAM_MIN_IDLE_MS),
+      maxPollMs: positiveIntSetting('EVENT_BUS_STREAM_MAX_POLL_MS', env.EVENT_BUS_STREAM_MAX_POLL_MS),
       claim: databaseUrl ? createPostgresProcessedEventClaim(databaseUrl) : undefined,
     });
   }
