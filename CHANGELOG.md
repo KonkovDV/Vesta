@@ -16,6 +16,8 @@ Audit of 2.15.0..4.2.0. Every fix below has a test that fails on 4.2.0.
 - `PostgresResearchReportRepository.find` returns at most 100 reports a page and rebuilds them four at a time. MP-K58.
 - `runKernel()` logs which product domains are on.
 - ADR-0004 states what 3.0.0 changed for several processes: Pub/Sub delivered every event to every process, a consumer group delivers it to one of them.
+- Dependencies, from the open Dependabot pull requests: OpenTelemetry JS 3.0 as one family (`@opentelemetry/sdk-node` and both OTLP HTTP exporters 0.300, `resources` and `sdk-metrics` 3.0, `api` 1.10, `auto-instrumentations-node` 0.82, `instrumentation-pino` 0.70, `semantic-conventions` 1.44). `sdk-metrics` is now declared: `instrumentation.ts` imports it. The lockfile holds one version of each core OpenTelemetry package; `initTelemetry` against a local OTLP endpoint exported traces and metrics. `ts-morph` 28 (TypeScript 6.0 inside; the AST checks of `src/infrastructure/mcp/audit/ast-checker.ts` ran on this tree), `pgvector` 0.3 (nothing imports it), `husky` 9 (nothing runs it). Actions: `actions/setup-node` 7.1.0, `github/codeql-action` init and analyze 4.39.1.
+- The Dependency Review workflow warns and stops while the repository's dependency graph is off; it failed on every pull request without reviewing anything. Any other API error still fails it. `npm audit --omit=dev --audit-level=high` in `ci` gates production dependencies either way.
 
 ## 4.2.0
 

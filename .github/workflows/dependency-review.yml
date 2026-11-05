@@ -15,11 +15,34 @@ jobs:
   dependency-review:
     runs-on: ubuntu-latest
     steps:
+      # The review reads the dependency graph. While it is off (Settings > Code security >
+      # Dependency graph), the action fails on every pull request without reviewing anything.
+      # Then this job warns and stops; any other API error still fails it. npm audit in the
+      # ci workflow gates production dependencies either way.
+      - name: Is the dependency graph on?
+        id: graph
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if gh api "repos/${GITHUB_REPOSITORY}/dependency-graph/compare/${BASE_SHA}...${HEAD_SHA}" --silent 2> graph-error.txt; then
+            echo "on=true" >> "$GITHUB_OUTPUT"
+          elif grep -qiE "HTTP 403|not supported|dependency graph" graph-error.txt; then
+            # The action itself reports every 403 from this endpoint as "not supported".
+            echo "::warning title=Dependency review skipped::$(head -c 300 graph-error.txt)"
+            echo "on=false" >> "$GITHUB_OUTPUT"
+          else
+            cat graph-error.txt
+            exit 1
+          fi
       - name: Checkout repository
+        if: steps.graph.outputs.on == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Dependency Review
+        if: steps.graph.outputs.on == 'true'
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           comment-summary-in-pr: always

@@ -77,6 +77,7 @@
 | resolve-all с `OPENAI_API_KEY`-заглушкой, домены выключены / включены | `registered=326 failed=2`; `registered=367 failed=2` (`IUnitOfWork`, `ISandboxPool`) |
 | нагрузка простаивающей шины (`INFO stats`, 5 с) | 1 тип: 39 → 2 команды/с; 10 типов: 376 → 20 |
 | `npm audit --omit=dev --audit-level=high` | код 0, 7 moderate |
+| те же прогоны после слияния восьми PR Dependabot (OpenTelemetry 3.0, ts-morph 28, pgvector 0.3, husky 9, setup-node 7.1.0, codeql-action 4.39.1), чистый `npm ci` | те же числа; `initTelemetry` с локальным OTLP-приёмником: трассы 1 932 байта, метрики 64 722 байта |
 
 Не проверялось: сборка Docker-образа, PostgreSQL 17 локально, реальные провайдеры моделей, установка пакета с github.com.
 
