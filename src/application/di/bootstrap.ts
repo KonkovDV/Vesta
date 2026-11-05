@@ -7,6 +7,7 @@
  */
 
 import { FeatureFlagsService, createFeatureFlagsService } from '../services/FeatureFlagsService';
+import { productDomainEnabled } from '../../config/product-domains';
 import { createAgentRunServiceFromTokens } from '../agents/create-agent-run-service';
 import { FeatureFlagsManagementService } from '../services/FeatureFlagsManagementService';
 import { DIContainer } from '../../core/di/container';
@@ -106,10 +107,6 @@ import { registerPluginRuntimeServices } from '../plugins/unified-plugin-registr
  * Module feature flag: defaults to enabled unless explicitly set to 'false'.
  * Usage: MODULE_RESEARCH_ENABLED=false, MODULE_HEALTHCARE_ENABLED=false
  */
-function isModuleEnabled(envKey: string): boolean {
-  const value = (readStr(envKey, 'true') ?? 'true').toLowerCase();
-  return value !== 'false' && value !== '0';
-}
 import type { IAppFactory } from '../../core/contracts/IAppFactory';
 import type { HttpAppDependencies } from '../app';
 import { ChatController } from '../controllers/chatController';
@@ -1252,16 +1249,17 @@ export function bootstrapApplicationLayer(container: DIContainer): void {
   registerPluginRuntimeServices(container);
   // 7) Identity Use Cases
   registerIdentityUseCases(container);
-  // 8) Research / Education Use Cases (optional: MODULE_RESEARCH_ENABLED)
-  if (isModuleEnabled('MODULE_RESEARCH_ENABLED')) {
+  // 8-11) Product domains: each only with MODULE_<NAME>_ENABLED=true (ADR-0005).
+  if (productDomainEnabled('research')) {
     registerResearchUseCasesFromDI(container);
   }
-  // 9) Sales Use Cases
-  registerSalesUseCases(container);
-  // 10) HR Use Cases
-  registerHrUseCases(container);
-  // 11) Healthcare Use Cases (optional: MODULE_HEALTHCARE_ENABLED)
-  if (isModuleEnabled('MODULE_HEALTHCARE_ENABLED')) {
+  if (productDomainEnabled('sales')) {
+    registerSalesUseCases(container);
+  }
+  if (productDomainEnabled('hr')) {
+    registerHrUseCases(container);
+  }
+  if (productDomainEnabled('healthcare')) {
     registerHealthcareUseCases(container);
   }
   // 12) Controllers

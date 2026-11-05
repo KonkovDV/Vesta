@@ -4,8 +4,8 @@
 
 | Version | Supported |
 | --- | --- |
-| 3.0.x | best effort |
-| 2.10.0 to 2.18.3 | no: upgrade to 3.0.x (default bus loses events, MP-K22) |
+| 4.0.x | best effort |
+| 2.10.0 to 3.0.1 | no: upgrade to 4.0.x (2.x: default bus loses events, MP-K22; 3.0.x: product domains on by default, MP-K38) |
 | 2.9.0 | no: upgrade (MP-K11, MP-K13, MP-K17) |
 
 ## Reporting a vulnerability

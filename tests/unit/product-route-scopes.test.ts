@@ -4,7 +4,23 @@ import { createServer, type Server } from 'node:http';
 import express from 'express';
 import { registerDefaultHttpRoutes } from '../../src/presentation/http/register-default-routes';
 
+/** These routes are mounted only with their product domain on (ADR-0005). */
+const DOMAIN_FLAGS = ['MODULE_SALES_ENABLED', 'MODULE_HR_ENABLED', 'MODULE_HEALTHCARE_ENABLED'];
+
 async function withScopes(scopes: string[], run: (base: string) => Promise<void>): Promise<void> {
+  const previous = DOMAIN_FLAGS.map((key) => [key, process.env[key]] as const);
+  for (const key of DOMAIN_FLAGS) process.env[key] = 'true';
+  try {
+    await serveWithScopes(scopes, run);
+  } finally {
+    for (const [key, value] of previous) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+async function serveWithScopes(scopes: string[], run: (base: string) => Promise<void>): Promise<void> {
   const app = express();
   app.use(express.json());
   const authMw: express.RequestHandler = (req, _res, next) => {

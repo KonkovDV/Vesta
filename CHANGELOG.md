@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.0.0
+
+- Breaking: sales, HR, healthcare, research, and x402 are off unless the deployment sets `MODULE_<NAME>_ENABLED=true` (`MODULE_SALES_ENABLED`, `MODULE_HR_ENABLED`, `MODULE_HEALTHCARE_ENABLED`, `MODULE_RESEARCH_ENABLED`, `MODULE_X402_ENABLED`). The research and healthcare flags existed and defaulted to on. Off means no use cases, controllers, services, workers, or routes for that domain. With the flags unset the kernel registers 327 DI tokens instead of 367 and mounts 50 routes instead of 58; with every flag on it is unchanged. Loaded modules and RSS did not move: the code is still imported. ADR-0005. MP-K38. `tests/unit/product-domains.test.ts`.
+- CI runs the resolve-all and route gates a second time with every product domain on.
+
 ## 3.0.1
 
 - A kernel pool no longer turns a server error during shutdown into an uncaught exception. pg-pool resolves `end()` before its removed clients have closed their sockets, and the kernel removed its `error` listener before `end()`. `PostgresAdapter`, the outbox, the event store, the MAS store, and the processed-event claim now end their pools through `endPool`, which keeps a no-op listener and returns once every client is removed. The repository race test, which failed in 1 of 4 runs, passed 10 of 10. MP-K47. `tests/unit/end-pool.test.ts`.

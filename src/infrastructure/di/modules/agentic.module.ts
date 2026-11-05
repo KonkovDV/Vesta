@@ -86,6 +86,7 @@ import { ContextWindowGuardAdapter } from '../../agents/ContextWindowGuardAdapte
 import { ToolLoopDetectorAdapter } from '../../agents/ToolLoopDetectorAdapter';
 import { ToolResultTruncatorAdapter } from '../../agents/ToolResultTruncatorAdapter';
 import { ContextPrunerAdapter } from '../../agents/ContextPrunerAdapter';
+import { productDomainEnabled } from '../../../config/product-domains';
 
 const log = getBootstrapLogger('agentic');
 
@@ -334,51 +335,7 @@ export function registerAgenticInterAgent(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  container.register(DI_TOKENS.IA2AX402MerchantPolicy, () => {
-    return new ProfiledA2AX402MerchantPolicy();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402PaymentRepository, () => {
-    return new InMemoryA2AX402PaymentRepository();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402NonceStore, () => {
-    return new InMemoryA2AX402NonceStore();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402SettlementPort, (c) => {
-    return new HttpA2AX402SettlementAdapter(
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IConfigLoader),
-      c.resolve(DI_TOKENS.ISsrfDnsGuard),
-    );
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402CommerceMeter, () => {
-    return new InMemoryA2AX402CommerceMeter();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.RequireA2AX402PaymentService, (c) => {
-    return new RequireA2AX402PaymentService(
-      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
-      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
-      c.resolve(DI_TOKENS.IEventStore),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
-    );
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.SubmitA2AX402PaymentService, (c) => {
-    return new SubmitA2AX402PaymentService(
-      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
-      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
-      c.resolve(DI_TOKENS.IA2AX402NonceStore),
-      c.resolve(DI_TOKENS.IA2AX402SettlementPort),
-      c.resolve(DI_TOKENS.IEventStore),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
-    );
-  }, { lifecycle: 'singleton' });
+  if (productDomainEnabled('x402')) registerA2AX402Services();
 
   container.register(DI_TOKENS.IAgentDialogueLoop, (c) => {
     return new AgentDialogueLoopAdapter(
@@ -387,7 +344,7 @@ export function registerAgenticInterAgent(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  log.info('Agentic Inter-Agent (Wave F) -> 11 services registered');
+  log.info('Agentic Inter-Agent (Wave F) services registered', { x402: productDomainEnabled('x402') });
 }
 
 // -----------------------------------------------------------------------------
@@ -631,3 +588,52 @@ export function registerContextPruner(): void {
   log.info('IContextPruner registered (OpenClaw Extraction V4)');
 }
 
+
+/** x402 paid A2A execution: a product domain, registered only with MODULE_X402_ENABLED=true (ADR-0005). */
+function registerA2AX402Services(): void {
+  container.register(DI_TOKENS.IA2AX402MerchantPolicy, () => {
+    return new ProfiledA2AX402MerchantPolicy();
+  }, { lifecycle: 'singleton' });
+
+  container.register(DI_TOKENS.IA2AX402PaymentRepository, () => {
+    return new InMemoryA2AX402PaymentRepository();
+  }, { lifecycle: 'singleton' });
+
+  container.register(DI_TOKENS.IA2AX402NonceStore, () => {
+    return new InMemoryA2AX402NonceStore();
+  }, { lifecycle: 'singleton' });
+
+  container.register(DI_TOKENS.IA2AX402SettlementPort, (c) => {
+    return new HttpA2AX402SettlementAdapter(
+      c.resolve(DI_TOKENS.IStructuredLogger),
+      c.resolve(DI_TOKENS.IConfigLoader),
+      c.resolve(DI_TOKENS.ISsrfDnsGuard),
+    );
+  }, { lifecycle: 'singleton' });
+
+  container.register(DI_TOKENS.IA2AX402CommerceMeter, () => {
+    return new InMemoryA2AX402CommerceMeter();
+  }, { lifecycle: 'singleton' });
+
+  container.register(DI_TOKENS.RequireA2AX402PaymentService, (c) => {
+    return new RequireA2AX402PaymentService(
+      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
+      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
+      c.resolve(DI_TOKENS.IEventStore),
+      c.resolve(DI_TOKENS.IStructuredLogger),
+      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
+    );
+  }, { lifecycle: 'singleton' });
+
+  container.register(DI_TOKENS.SubmitA2AX402PaymentService, (c) => {
+    return new SubmitA2AX402PaymentService(
+      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
+      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
+      c.resolve(DI_TOKENS.IA2AX402NonceStore),
+      c.resolve(DI_TOKENS.IA2AX402SettlementPort),
+      c.resolve(DI_TOKENS.IEventStore),
+      c.resolve(DI_TOKENS.IStructuredLogger),
+      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
+    );
+  }, { lifecycle: 'singleton' });
+}

@@ -101,3 +101,17 @@ jobs:
         run: |
           node scripts/ci-resolve-all.cjs
           node scripts/ci-routes-auth.cjs
+      - name: Same gates with every product domain on (ADR-0005)
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          REDIS_URL: redis://127.0.0.1:6379
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: "6379"
+          MODULE_SALES_ENABLED: "true"
+          MODULE_HR_ENABLED: "true"
+          MODULE_HEALTHCARE_ENABLED: "true"
+          MODULE_RESEARCH_ENABLED: "true"
+          MODULE_X402_ENABLED: "true"
+        run: |
+          node scripts/ci-resolve-all.cjs
+          node scripts/ci-routes-auth.cjs
