@@ -6,7 +6,8 @@ import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Client } from 'pg';
 import { EventFactory } from '../../src/domain/events/event-store.interface';
-import { RedisStreamsEventBus } from '../../src/infrastructure/events/redis-streams-event-bus';
+import Redis from 'ioredis';
+import { RedisStreamsEventBus, streamFeaturesFor } from '../../src/infrastructure/events/redis-streams-event-bus';
 import { createPostgresProcessedEventClaim } from '../../src/infrastructure/events/processed-event-claim';
 import { CORE_MIGRATIONS_DIR, runMigrations } from '../../src/infrastructure/database/migration-runner';
 
@@ -124,5 +125,71 @@ test('a finished event id is not handled twice', { skip: !redisUrl || !baseUrl }
     assert.equal(handled, 1);
   } finally {
     await reader.close();
+  }
+});
+
+/** A raw client for checks the bus does not expose. */
+async function withRaw<T>(work: (raw: Redis) => Promise<T>): Promise<T> {
+  const raw = new Redis({ ...redisConnection(), lazyConnect: true, maxRetriesPerRequest: 1 });
+  await raw.connect();
+  try { return await work(raw); } finally { await raw.quit(); }
+}
+
+async function serverFeatures(): Promise<{ ackedTrim: boolean; idempotentAdd: boolean }> {
+  const info = await withRaw((raw) => raw.info('server'));
+  return streamFeaturesFor(/redis_version:([^\r\n]+)/.exec(info)?.[1]);
+}
+
+test('the bus picks its XADD options from the server version', { skip: !redisUrl }, async () => {
+  const reader = bus(`features-${process.pid}-${Date.now()}:`);
+  await reader.initialize();
+  try {
+    assert.deepEqual(reader.getStreamFeatures(), await serverFeatures());
+  } finally {
+    await reader.close();
+  }
+});
+
+test('trimming keeps entries a consumer group has not acknowledged (Redis 8.2+)', { skip: !redisUrl }, async (t) => {
+  if (!(await serverFeatures()).ackedTrim) {
+    t.skip('server older than Redis 8.2: MAXLEN still trims unacknowledged entries');
+    return;
+  }
+  const prefix = `acked-${process.pid}-${Date.now()}:`;
+  const stream = `${prefix}stream:StreamBacklog`;
+  // A group that exists and reads nothing: a consumer that is down.
+  await withRaw((raw) => raw.xgroup('CREATE', stream, 'slow-readers', '0', 'MKSTREAM'));
+  const writer = bus(prefix, { maxLen: 10 });
+  await writer.initialize();
+  try {
+    for (let i = 0; i < 400; i += 1) {
+      await writer.publish(EventFactory.createBaseEvent(`agg-${i}`, 'StreamBacklog', { i }, 'corr_stream_backlog'));
+    }
+    assert.equal(await withRaw((raw) => raw.xlen(stream)), 400, 'no unacknowledged entry was trimmed');
+  } finally {
+    await writer.close();
+    await withRaw((raw) => raw.del(stream));
+  }
+});
+
+test('a repeated publish of one event adds one entry; a dead-letter replay adds another (Redis 8.6+)', { skip: !redisUrl }, async (t) => {
+  if (!(await serverFeatures()).idempotentAdd) {
+    t.skip('server older than Redis 8.6: no IDMP, processed_events skips the repeat');
+    return;
+  }
+  const prefix = `idmp-${process.pid}-${Date.now()}:`;
+  const stream = `${prefix}stream:StreamTwice`;
+  const event = EventFactory.createBaseEvent('agg-twice', 'StreamTwice', { n: 1 }, 'corr_stream_twice1');
+  const writer = bus(prefix);
+  await writer.initialize();
+  try {
+    await writer.publish(event);
+    await writer.publish(event);
+    assert.equal(await withRaw((raw) => raw.xlen(stream)), 1, 'the outbox retry of one row is one entry');
+    await writer.replayDeadLetterEvent({ originalEvent: event, error: { message: 'probe' }, deadLetterAt: new Date(), retryCount: 5 });
+    assert.equal(await withRaw((raw) => raw.xlen(stream)), 2, 'a replay is a new delivery');
+  } finally {
+    await writer.close();
+    await withRaw((raw) => raw.del(stream));
   }
 });

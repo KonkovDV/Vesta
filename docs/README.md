@@ -11,3 +11,4 @@
 | [adr/0001-kernel-as-package.md](adr/0001-kernel-as-package.md) | Package versus fork |
 | [adr/0002-long-running-case.md](adr/0002-long-running-case.md) | A case that lives for months is not an agent episode |
 | [adr/0003-product-placement.md](adr/0003-product-placement.md) | Which rules stay in the kernel |
+| [adr/0004-durable-event-bus-by-default.md](adr/0004-durable-event-bus-by-default.md) | Why the default bus is Redis Streams |

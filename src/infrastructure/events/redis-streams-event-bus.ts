@@ -2,6 +2,15 @@
  * Redis Streams event bus.
  * XADD keeps the entry when no consumer is running. A handler that does not
  * acknowledge leaves the entry pending, and the next consumer claims it.
+ *
+ * What the server supports decides two XADD options (see streamFeaturesFor):
+ * - Redis 8.2 `ACKED`: trimming to MAXLEN keeps an entry a consumer group has not
+ *   acknowledged. Older servers trim it, so a group that falls more than MAXLEN
+ *   entries behind loses the oldest ones.
+ * - Redis 8.6 `IDMP <producer> <eventId>`: a second XADD of one event, such as an
+ *   outbox retry after a crash between XADD and the published mark, returns the first
+ *   entry instead of adding another. Redis keeps the last 100 ids for 100 s per stream
+ *   by default; outside that window processed_events still skips the repeat.
  */
 import Redis from 'ioredis';
 import type { DomainEvent } from '../../domain/events/event-store.interface';
@@ -42,6 +51,42 @@ export interface RedisStreamsEventBusOptions {
   claim?: ProcessedEventClaim;
 }
 
+/** Stream options of the connected server. */
+export interface StreamFeatures {
+  /** XADD ... ACKED (Redis 8.2): trimming keeps entries a consumer group has not acknowledged. */
+  ackedTrim: boolean;
+  /** XADD ... IDMP pid iid (Redis 8.6): a repeated add of one id returns the first entry. */
+  idempotentAdd: boolean;
+}
+
+/**
+ * Reads `redis_version` from INFO. Forks that report an older Redis version
+ * (Valkey reports 7.2.x) get neither option, which is the behaviour before 8.2.
+ */
+export function streamFeaturesFor(redisVersion: string | undefined): StreamFeatures {
+  const match = /^(\d+)\.(\d+)/.exec((redisVersion ?? '').trim());
+  const major = match ? Number(match[1]) : 0;
+  const minor = match ? Number(match[2]) : 0;
+  const atLeast = (wantMajor: number, wantMinor: number) =>
+    major > wantMajor || (major === wantMajor && minor >= wantMinor);
+  return { ackedTrim: atLeast(8, 2), idempotentAdd: atLeast(8, 6) };
+}
+
+/** XADD arguments after the key, in the order Redis requires. */
+export function xaddArguments(
+  features: StreamFeatures,
+  maxLen: number,
+  body: string,
+  idempotency?: { producer: string; id: string },
+): Array<string | number> {
+  return [
+    ...(features.ackedTrim ? ['ACKED'] : []),
+    ...(features.idempotentAdd && idempotency ? ['IDMP', idempotency.producer, idempotency.id] : []),
+    'MAXLEN', '~', maxLen,
+    '*', 'body', body,
+  ];
+}
+
 interface StoredBody {
   eventId: string;
   eventType: string;
@@ -79,6 +124,7 @@ export class RedisStreamsEventBus implements IEventBus {
     uptime: 0,
   };
   private readonly startedAt = Date.now();
+  private features: StreamFeatures = { ackedTrim: false, idempotentAdd: false };
   private initialized = false;
   private closed = false;
   private stop = false;
@@ -106,10 +152,22 @@ export class RedisStreamsEventBus implements IEventBus {
   async initialize(): Promise<void> {
     if (this.initialized) return;
     await this.redis.connect();
+    const info = await this.redis.info('server');
+    this.features = streamFeaturesFor(/redis_version:([^\r\n]+)/.exec(info)?.[1]);
     this.initialized = true;
   }
 
+  /** The XADD options this bus uses on the connected server. */
+  getStreamFeatures(): StreamFeatures {
+    return { ...this.features };
+  }
+
   async publish<T extends DomainEvent>(event: T, options: PublishOptions = {}): Promise<void> {
+    await this.append(event, options, true);
+  }
+
+  /** `idempotent` is false for a dead-letter replay: that one must add a new entry. */
+  private async append<T extends DomainEvent>(event: T, options: PublishOptions, idempotent: boolean): Promise<void> {
     this.ensureOpen();
     if (options.signal?.aborted) {
       throw new Error(`Publish aborted: ${options.signal.reason ?? 'No reason provided'}`);
@@ -127,7 +185,7 @@ export class RedisStreamsEventBus implements IEventBus {
       metadata: event.metadata,
     };
     try {
-      await this.xadd(this.streamKey(event.type), body);
+      await this.xadd(this.streamKey(event.type), body, idempotent ? event.eventId : undefined);
       this.metrics.eventsPublished += 1;
     } catch (error) {
       this.metrics.eventsFailed += 1;
@@ -233,7 +291,7 @@ export class RedisStreamsEventBus implements IEventBus {
   }
 
   async replayDeadLetterEvent(deadLetterEvent: DeadLetterEvent): Promise<void> {
-    await this.publish(deadLetterEvent.originalEvent);
+    await this.append(deadLetterEvent.originalEvent, {}, false);
   }
 
   async clearDeadLetterQueue(eventType?: string): Promise<void> {
@@ -359,8 +417,9 @@ export class RedisStreamsEventBus implements IEventBus {
     }
   }
 
-  private async xadd(stream: string, body: StoredBody): Promise<void> {
-    await this.redis.xadd(stream, 'MAXLEN', '~', this.maxLen, '*', 'body', JSON.stringify(body));
+  private async xadd(stream: string, body: StoredBody, idempotentId?: string): Promise<void> {
+    const idempotency = idempotentId ? { producer: `${this.prefix}events`, id: idempotentId } : undefined;
+    await this.redis.call('XADD', stream, ...xaddArguments(this.features, this.maxLen, JSON.stringify(body), idempotency));
   }
 
   private async ack(stream: string, id: string): Promise<void> {

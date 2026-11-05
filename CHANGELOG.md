@@ -1,5 +1,11 @@
 # Changelog
 
+## 3.0.0
+
+- Breaking: an empty `EVENT_BUS_TRANSPORT` selects Redis Streams. Before, it selected Pub/Sub, which drops a publish that reaches no subscriber, so the outbox marked rows PUBLISHED that no consumer ever read. A process that subscribed to the kernel's Pub/Sub channels from outside now joins a consumer group on `<prefix>stream:<eventType>`, or the deployment sets `EVENT_BUS_TRANSPORT=pubsub`. ADR-0004. MP-K22. `tests/unit/event-bus-transport.test.ts`.
+- The streams bus reads `redis_version` when it connects. From Redis 8.2 it trims with `ACKED`, so the cap of `EVENT_BUS_STREAM_MAXLEN` entries does not remove an entry a consumer group has not acknowledged. On Redis 8.10.3 a group that read nothing kept 400 of 400 entries under a cap of 10; the old call kept 100. From Redis 8.6 it adds each event with `IDMP <prefix>events <eventId>`, so an outbox retry of one row adds one entry; a dead-letter replay still adds a new one. Older servers, and forks that report an older version, keep the 2.x call. `tests/integration/redis-streams-bus.test.ts`.
+- CI runs the integration job on `redis:7-alpine` and `redis:8.10-alpine`.
+
 ## 2.18.3
 
 - `follow-redirects` 1.16.2 (through `@slack/bolt` → `axios`) and `systeminformation` 5.33.19 (through `@opentelemetry/auto-instrumentations-node`). The production audit reported two high advisories in 1.16.1 and 5.33.15 (GHSA-mrwp-f3q8-3g9p, GHSA-3f7j-7jwc-fxfj), so the CI audit step failed on an unchanged tree. Only those two entries of `package-lock.json` moved. `npm audit --omit=dev --audit-level=high` exits 0. Seven moderate advisories remain (`glob`/`minimatch` under `ts-morph` and `gaxios`); their fix is a major `glob`.
