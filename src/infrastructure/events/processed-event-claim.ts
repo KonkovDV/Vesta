@@ -1,4 +1,5 @@
 import { Pool } from 'pg';
+import { endPool } from '../database/end-pool';
 
 /**
  * Remembers a finished (consumer, event id) pair in `processed_events`.
@@ -30,7 +31,7 @@ export function createPostgresProcessedEventClaim(connectionString: string): Pro
       );
     },
     async close(): Promise<void> {
-      await pool.end();
+      await endPool(pool);
     },
   };
 }

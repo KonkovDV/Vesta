@@ -24,6 +24,7 @@
 
 import { Pool, PoolConfig, QueryResult as PgQueryResult, PoolClient } from 'pg';
 import { randomUUID } from 'crypto';
+import { endPool } from './end-pool';
 import {
   IDatabaseConnection,
   QueryResult,
@@ -682,7 +683,7 @@ export class PostgresAdapter implements IDatabaseConnection {
     this.pool.off('error', this.onPoolError);
     this.pool.off('remove', this.onPoolRemove);
 
-    await this.pool.end();
+    await endPool(this.pool);
     this.connectionState = ConnectionState.DISCONNECTED;
     this.isClosed = true;
   }

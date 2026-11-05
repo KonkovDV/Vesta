@@ -1,5 +1,9 @@
 # Changelog
 
+## 3.0.1
+
+- A kernel pool no longer turns a server error during shutdown into an uncaught exception. pg-pool resolves `end()` before its removed clients have closed their sockets, and the kernel removed its `error` listener before `end()`. `PostgresAdapter`, the outbox, the event store, the MAS store, and the processed-event claim now end their pools through `endPool`, which keeps a no-op listener and returns once every client is removed. The repository race test, which failed in 1 of 4 runs, passed 10 of 10. MP-K47. `tests/unit/end-pool.test.ts`.
+
 ## 3.0.0
 
 - Breaking: an empty `EVENT_BUS_TRANSPORT` selects Redis Streams. Before, it selected Pub/Sub, which drops a publish that reaches no subscriber, so the outbox marked rows PUBLISHED that no consumer ever read. A process that subscribed to the kernel's Pub/Sub channels from outside now joins a consumer group on `<prefix>stream:<eventType>`, or the deployment sets `EVENT_BUS_TRANSPORT=pubsub`. ADR-0004. MP-K22. `tests/unit/event-bus-transport.test.ts`.

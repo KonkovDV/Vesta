@@ -26,6 +26,7 @@ import {
 import { CorrelationIdProvider } from '../../core/correlation/correlation';
 import { isValidPostgresIdentifier, qualifyIdentifier } from '../database/postgres-identifiers';
 import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
+import { endPool } from '../database/end-pool';
 import { getConfig } from '../../config';
 import { tryJsonParse } from '../../core/utils/json';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
@@ -400,7 +401,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
 
   async close(): Promise<void> {
     this.pool.off('error', this.onPoolError);
-    await this.pool.end();
+    await endPool(this.pool);
   }
 
   async saveEvents(events: DomainEvent[], options?: SaveEventsOptions): Promise<SaveEventsResult> {

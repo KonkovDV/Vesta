@@ -22,6 +22,7 @@ import {
 } from '../../domain/events/outbox.interface';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
 import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
+import { endPool } from '../database/end-pool';
 import { DomainEvent } from '../../domain/events/event-store.interface';
 import { IEventBus } from '../../domain/events/event-bus.interface';
 import { getOrCreateCounter, getOrCreateHistogram } from '../../monitoring';
@@ -1235,7 +1236,7 @@ export class PostgreSQLOutbox implements IOutbox {
     await this.stopProcessing();
     // Symmetric unsubscription — prevents EventEmitter listener leaks (OOM-008)
     this.pool.removeListener('error', this.onPoolError);
-    await this.pool.end();
+    await endPool(this.pool);
     console.log('📦 PostgreSQL Outbox connections closed');
   }
 
