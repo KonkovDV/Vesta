@@ -115,8 +115,7 @@ test('two saves of one research report version: one commits, the other is a conf
       ids.push(created.id.toValue());
     }
     const pairs = await Promise.all(ids.map(async (id) => {
-      // findById of this repository cannot rebuild a report (MP-K44); the journal can.
-      const [left, right] = await Promise.all([repo.rehydrate(ResearchReportId.fromString(id)), repo.rehydrate(ResearchReportId.fromString(id))]);
+      const [left, right] = await Promise.all([repo.findById(ResearchReportId.fromString(id)), repo.findById(ResearchReportId.fromString(id))]);
       assert.ok(left.success && right.success);
       left.data.addArticle(article(`${id}-a`));
       right.data.addArticle(article(`${id}-b`));
@@ -138,3 +137,24 @@ test('two saves of one research report version: one commits, the other is a conf
   }
 });
 
+
+test('findById and find rebuild a saved research report from the journal (MP-K44)', { skip: !baseUrl }, async () => {
+  const { db, outbox, eventStore, close } = connections();
+  const repo = new PostgresResearchReportRepository(db, outbox, eventStore);
+  try {
+    const report = ResearchReport.create(ResearchTopic.fromString('commit order reader'), ResearcherId.fromString('researcher_find'));
+    report.addArticle(Article.create({ id: 'find-a', title: 'commit order reader', abstract: 'a commit order reader', source: 'probe' }));
+    assert.equal((await repo.save(report)).success, true);
+
+    const found = await repo.findById(ResearchReportId.fromString(report.id.toValue()));
+    assert.ok(found.success, found.success ? '' : found.error.message);
+    assert.equal(found.data.version, report.version);
+    assert.equal(found.data.topic.value, 'commit order reader');
+
+    const listed = await repo.find({ researcherId: 'researcher_find' });
+    assert.ok(listed.success, listed.success ? '' : listed.error.message);
+    assert.deepEqual(listed.data.reports.map((item) => item.id.toValue()), [report.id.toValue()]);
+  } finally {
+    await close();
+  }
+});

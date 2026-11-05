@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.0.1
+
+- `PostgresResearchReportRepository.findById` and `find` rebuild each report from the journal. Both called `restoreFromHistory` with no events, which throws, so they returned `CONNECTION_ERROR` for every saved report. MP-K44. `tests/integration/repository-version-race.test.ts`.
+
 ## 4.0.0
 
 - Breaking: sales, HR, healthcare, research, and x402 are off unless the deployment sets `MODULE_<NAME>_ENABLED=true` (`MODULE_SALES_ENABLED`, `MODULE_HR_ENABLED`, `MODULE_HEALTHCARE_ENABLED`, `MODULE_RESEARCH_ENABLED`, `MODULE_X402_ENABLED`). The research and healthcare flags existed and defaulted to on. Off means no use cases, controllers, services, workers, or routes for that domain. With the flags unset the kernel registers 327 DI tokens instead of 367 and mounts 50 routes instead of 58; with every flag on it is unchanged. Loaded modules and RSS did not move: the code is still imported. ADR-0005. MP-K38. `tests/unit/product-domains.test.ts`.

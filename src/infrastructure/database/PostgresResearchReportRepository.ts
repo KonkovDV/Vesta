@@ -98,17 +98,8 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
         };
       }
 
-      // Восстанавливаем агрегат из данных
-      const report = this.hydrateFromDb(result.rows[0] as {
-        id: string;
-        topic: string;
-        status: string;
-        created_by: string;
-        created_at: string;
-        completed_at?: string;
-        version?: number;
-      });
-      return { success: true, data: report };
+      // The read model holds no articles, summaries, or trends; the journal does (MP-K44).
+      return this.rehydrate(id);
 
     } catch (error) {
       return {
@@ -167,15 +158,15 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
 
       const result = await this.db.query(query, params);
 
-      const reports = result.rows.map(row => this.hydrateFromDb(row as {
-        id: string;
-        topic: string;
-        status: string;
-        created_by: string;
-        created_at: string;
-        completed_at?: string;
-        version?: number;
-      }));
+      // Each row names a report; the journal rebuilds it (MP-K44).
+      const rebuilt = await Promise.all(
+        result.rows.map((row) => this.rehydrate(ResearchReportId.fromString((row as { id: string }).id))),
+      );
+      const failed = rebuilt.find((item) => !item.success);
+      if (failed && !failed.success) {
+        return { success: false, error: failed.error };
+      }
+      const reports = rebuilt.flatMap((item) => (item.success ? [item.data] : []));
       const total = await this.getTotalCount(options);
 
       return {
@@ -392,30 +383,6 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
   }
 
   // Приватные методы для маппинга данных
-  private hydrateFromDb(dbRow: {
-    id: string;
-    topic: string;
-    status: string;
-    created_by: string;
-    created_at: string;
-    completed_at?: string;
-    version?: number;
-  }): ResearchReport {
-    // Восстановление агрегата из упрощенной read‑model записи
-    // Для полного восстановления состояния нужно использовать rehydrate с событиями
-    const createdAt = new Date(dbRow.created_at);
-    const completedAt = dbRow.completed_at ? new Date(dbRow.completed_at) : undefined;
-
-    // Props not used - restoreFromHistory handles reconstitution
-    // This read-model hydrate is simplified; full reconstitution uses event replay
-
-    // Для полного восстановления состояния используйте rehydrate с событиями
-    return ResearchReport.restoreFromHistory(
-      ResearchReportId.fromString(dbRow.id),
-      [] // Пустой массив событий - read-model не содержит полного состояния
-    );
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private dehydrateToDb(report: any): {
     id: string;
