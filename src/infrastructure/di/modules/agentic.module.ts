@@ -271,13 +271,18 @@ export function registerAgenticChains(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  container.register(DI_TOKENS.IDeepResearchService, (c) => {
-    return new DeepResearchAdapter(
-      c.resolve(DI_TOKENS.LLMAdapterFactory),
-      c.resolve(DI_TOKENS.IResearchService),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-    );
-  }, { lifecycle: 'singleton' });
+  // Deep research searches through IResearchService, which the research domain registers
+  // (ADR-0005). Without it the token was registered and every resolve failed.
+  const deepResearch = productDomainEnabled('research');
+  if (deepResearch) {
+    container.register(DI_TOKENS.IDeepResearchService, (c) => {
+      return new DeepResearchAdapter(
+        c.resolve(DI_TOKENS.LLMAdapterFactory),
+        c.resolve(DI_TOKENS.IResearchService),
+        c.resolve(DI_TOKENS.IStructuredLogger),
+      );
+    }, { lifecycle: 'singleton' });
+  }
 
   container.register(DI_TOKENS.ICitationExtractor, (c) => {
     return new CitationExtractorAdapter(
@@ -285,7 +290,7 @@ export function registerAgenticChains(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  log.info('Agentic Chains (Wave E) -> 3 services registered');
+  log.info('Agentic Chains (Wave E) services registered', { deepResearch });
 }
 
 // -----------------------------------------------------------------------------

@@ -388,6 +388,10 @@ export async function runKernel(options: KernelOptions = {}): Promise<{ app: unk
     const { safeParseInt } = await import('./core/config/safe-parse');
     const { bootstrapApplication } = await import('./core/bootstrap/orchestrator');
     const { bootstrap: infrastructureBootstrap } = await import('./infrastructure/di/bootstrap');
+    const { PRODUCT_DOMAINS, productDomainEnabled } = await import('./config/product-domains');
+    const domainsOn = PRODUCT_DOMAINS.filter((domain) => productDomainEnabled(domain));
+    // Since 4.0.0 each domain needs MODULE_<NAME>_ENABLED=true; an upgrade that missed it shows "none" here.
+    console.log(`[EntryPoint] Product domains on: ${domainsOn.length > 0 ? domainsOn.join(', ') : 'none'} (ADR-0005)`);
 
     const result = await bootstrapApplication({
       infrastructure: {

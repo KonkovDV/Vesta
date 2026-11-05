@@ -117,3 +117,17 @@ jobs:
         run: |
           node scripts/ci-resolve-all.cjs
           node scripts/ci-routes-auth.cjs
+      # Without a provider key 21 budgeted tokens fail on LLMAdapterFactory (MP-K35) and hide
+      # any second failure behind it. A placeholder key (no request is sent at resolve time)
+      # lets the gate see the wiring under them, with the domains off and on.
+      - name: Resolve-all with a placeholder model key
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          REDIS_URL: redis://127.0.0.1:6379
+          REDIS_HOST: 127.0.0.1
+          REDIS_PORT: "6379"
+          OPENAI_API_KEY: sk-ci-placeholder-not-a-key
+        run: |
+          node scripts/ci-resolve-all.cjs
+          MODULE_SALES_ENABLED=true MODULE_HR_ENABLED=true MODULE_HEALTHCARE_ENABLED=true \
+            MODULE_RESEARCH_ENABLED=true MODULE_X402_ENABLED=true node scripts/ci-resolve-all.cjs
