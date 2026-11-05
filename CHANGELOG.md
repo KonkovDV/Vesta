@@ -1,5 +1,22 @@
 # Changelog
 
+## 4.3.0
+
+Audit of 2.15.0..4.2.0. Every fix below has a test that fails on 4.2.0.
+
+- Security: the default Streams bus passes `REDIS_TLS` to its Redis client. From 3.0.0 it dropped it: a TLS-only Redis was unreachable, and a server that also accepts plain TCP got the password and every event unencrypted. MP-K49. `tests/unit/event-bus-transport.test.ts`.
+- A stream entry the bus cannot parse goes to the dead-letter stream on its first delivery. It used to stay pending and stop every later entry of that stream. MP-K50.
+- Retries count the delivery number in the pending entries list, not in process memory. An entry whose handler stopped the process `EVENT_BUS_STREAM_MAX_DELIVERIES` times goes to the dead-letter stream without running again; before, every restart ran it again. MP-K51.
+- Hard cap for `ACKED`: every 100 publishes to a stream the bus checks its length; above `EVENT_BUS_STREAM_HARD_MAXLEN` (new, default 10 x `EVENT_BUS_STREAM_MAXLEN`) it runs `XTRIM MAXLEN ~ DELREF`, which drops the oldest entries a stopped group never acknowledged, counts them in `event_bus_stream_forced_trim_entries_total{stream}`, and logs an error. Before, such a stream grew without bound. A failed check does not fail the publish. MP-K52.
+- A Redis that refuses or renames `INFO` no longer stops the start: the bus warns and adds entries without `ACKED` and `IDMP`. Another `INFO` failure, such as a dropped connection, still stops it. MP-K53.
+- `EVENT_BUS_STREAM_MAXLEN`, `EVENT_BUS_STREAM_HARD_MAXLEN`, `EVENT_BUS_STREAM_MAX_DELIVERIES`, `EVENT_BUS_STREAM_MIN_IDLE_MS` (0 allowed), and `EVENT_BUS_STREAM_MAX_POLL_MS` must be positive integers, or the start fails with the setting's name. `10k` used to start and fail every publish. MP-K54.
+- An idle bus sleeps longer after each empty read, up to `EVENT_BUS_STREAM_MAX_POLL_MS` (new, default 1000). Ten subscribed event types sent 376 Redis commands a second per process with nothing to read, now 20. A delivery, a subscribe, or a local publish of a read type wakes it. MP-K55.
+- `close()` removes the process's consumer from each group when it holds no pending entry. MP-K56.
+- `IDeepResearchService` is registered only with `MODULE_RESEARCH_ENABLED=true`. From 4.0.0 it was registered without the research domain and every resolve failed. The resolve-all gate now fails on a missing dependency even for a budgeted token, and CI runs it a third time with a placeholder model key: with the domains off 2 tokens fail there, against 23 without a key, where MP-K35 fails first. MP-K57. `tests/unit/ci-gates.test.ts`.
+- `PostgresResearchReportRepository.find` returns at most 100 reports a page and rebuilds them four at a time. MP-K58.
+- `runKernel()` logs which product domains are on.
+- ADR-0004 states what 3.0.0 changed for several processes: Pub/Sub delivered every event to every process, a consumer group delivers it to one of them.
+
 ## 4.2.0
 
 - Typed DI tokens (T2.3, step 1). `InjectionToken<T>` is a string or symbol that names the type it resolves to; `createToken<T>(name)` makes one, `container.inject(token)` returns that type without a type argument, `container.provide(token, factory)` checks what the factory returns. At run time a token is the same string, so typed and string calls share one registration and modules can move one at a time. `KernelTokens` types seven public ports. The package root exports `createToken`, `InjectionToken`, `TokenType`, and `KernelTokens`. The guarded extension container treats `provide` like `register`. `npm run typecheck` compiles `src/core/di/injection-token.typecheck.ts`, where a wrong type, a wrong factory, and a bare string must stay compile errors. CI fails when `resolve()` calls with a string literal in `src` exceed 204. MP-K48. `tests/unit/injection-token.test.ts`.

@@ -18,15 +18,17 @@ Two Redis releases close the remaining gaps of a stream used this way:
 ## Decision
 
 1. From 3.0.0 an empty `EVENT_BUS_TRANSPORT` selects Redis Streams. `pubsub` must be set explicitly.
-2. The streams bus reads `redis_version` from `INFO` when it connects. From 8.2 it trims with `ACKED`. From 8.6 it adds each event with `IDMP <prefix>events <eventId>`. A dead-letter replay is added without `IDMP`, because it is a new delivery. Older servers, and forks that report an older version (Valkey reports 7.2.x), get neither option.
+2. The streams bus reads `redis_version` from `INFO` when it connects. From 8.2 it trims with `ACKED`. From 8.6 it adds each event with `IDMP <prefix>events <eventId>`. A dead-letter replay is added without `IDMP`, because it is a new delivery. Older servers, forks that report an older version (Valkey reports 7.2.x), and, since 4.3.0, a server that refuses `INFO` get neither option.
 3. `processed_events` stays the guarantee on the consumer side. `IDMP` only removes most duplicates at the source.
 
 ## Consequences
 
 - A process that subscribed to the kernel's Pub/Sub channels from outside receives nothing after the upgrade. It joins a consumer group on `<prefix>stream:<eventType>`, or the deployment sets `EVENT_BUS_TRANSPORT=pubsub`. That is why this is a major version.
 - On Redis older than 8.2 a group that falls more than `EVENT_BUS_STREAM_MAXLEN` entries behind (default 10 000 per event type) still loses the oldest entries. The journal keeps every event; `getCommittedEventsAfter` rebuilds such a consumer.
-- With `ACKED`, a group that stops reading makes its stream grow past `MAXLEN` until it catches up or the group is deleted. Watch `XINFO GROUPS` lag and the stream length.
+- With `ACKED`, a group that stops reading makes its stream grow past `MAXLEN` until it catches up or the group is deleted. Watch `XINFO GROUPS` lag and the stream length. Since 4.3.0 a hard cap (`EVENT_BUS_STREAM_HARD_MAXLEN`, default 10 x `MAXLEN`) trims such a stream with `DELREF` and counts the dropped entries in `event_bus_stream_forced_trim_entries_total`: Redis memory is bounded, and that group loses the oldest entries it never read (MP-K52).
+- Pub/Sub delivered each event to every subscribed process. A consumer group delivers it to one process of the group (`EVENT_BUS_STREAM_GROUP`, default `microphoenix`). A handler that must run in every replica, such as one that drops a local cache, needs a group per replica or Pub/Sub. Two applications that share a Redis and the default key prefix also share the group and split the events between them; each sets its own `REDIS_EVENT_BUS_PREFIX` or group.
 - Streams need `DATABASE_URL` for `processed_events`. Without it a handler can run twice for one event.
+- The 4.3.0 audit found what the first version of this bus missed: it dropped `REDIS_TLS` (MP-K49), one unreadable entry stopped its stream (MP-K50), a handler that stopped the process was retried after every restart (MP-K51), a Redis that refuses `INFO` stopped the start (MP-K53), and an idle process sent about 38 commands a second per event type (MP-K55).
 - CI runs the integration job on `redis:7-alpine` and `redis:8.10-alpine`, so both paths stay tested.
 
 ## Sources
@@ -36,3 +38,5 @@ Two Redis releases close the remaining gaps of a stream used this way:
 - Redis, Streaming use case: at-least-once with `XREADGROUP`/`XACK`, the pending list, an `XAUTOCLAIM` sweep, a trim policy. https://redis.io/docs/latest/develop/use-cases/streaming/
 - OneUptime, How to choose between Pub/Sub and Streams in Redis (2026-01-25). https://oneuptime.com/blog/post/2026-01-25-redis-pubsub-vs-streams/markdown
 - Conduktor, Outbox pattern for reliable event publishing (relay at least once, idempotent consumer). https://www.conduktor.io/glossary/outbox-pattern-for-reliable-event-publishing
+- Redis, `XTRIM` command reference: `~` with the default `LIMIT` of 100 stream nodes per call, `DELREF`. https://redis.io/docs/latest/commands/xtrim/
+- Redis, `XPENDING` command reference: the delivery counter of each pending entry. https://redis.io/docs/latest/commands/xpending/

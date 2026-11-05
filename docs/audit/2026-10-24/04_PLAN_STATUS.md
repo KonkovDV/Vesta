@@ -1,6 +1,6 @@
 # Статус плана 02 относительно дерева, 2026-11-05
 
-План — `02_WORK_PLAN_FOR_AI.md`. Здесь сверено, что из него есть в дереве версии 4.2.0, и чем это проверено. Строка без теста или команды — не заявление.
+План — `02_WORK_PLAN_FOR_AI.md`. Здесь сверено, что из него есть в дереве версии 4.2.0, и чем это проверено; ниже — аудит изменений 2.15.0..4.2.0 и его исправления в 4.3.0. Строка без теста или команды — не заявление.
 
 Среда проходов 2026-11-04 и 2026-11-05: Node 24.22.1, PostgreSQL 16.15 с pgvector 0.8.1 (собран из исходников), Redis 7.0.15 и Redis 8.10.3 (собран из исходников), Linux. CI использует `pgvector/pgvector:pg17` и с 3.0.0 — `redis:7-alpine` и `redis:8.10-alpine`. Workflow запускается на push в `main` и на pull request.
 
@@ -19,7 +19,7 @@
 | Задача | Статус | Коммиты | Проверка | Что осталось |
 | --- | --- | --- | --- | --- |
 | Фаза 0 | сделано | `4489884` (2.10.0) | CHANGELOG 2.10.0 | — |
-| T1.1 Redis Streams | сделано | `5508ed7` (2.13.0), `3ab765a` (3.0.0) | `tests/integration/redis-streams-bus.test.ts` на Redis 7 и 8.10, `tests/unit/event-bus-transport.test.ts`. На Redis 8.10.3 группа, не прочитавшая ничего, сохранила 400 из 400 записей при пределе 10; прежний вызов — 100 | На Redis старше 8.2 отставшая больше `EVENT_BUS_STREAM_MAXLEN` группа теряет старые записи |
+| T1.1 Redis Streams | сделано | `5508ed7` (2.13.0), `3ab765a` (3.0.0), аудит 4.3.0 | `tests/integration/redis-streams-bus.test.ts` на Redis 7 и 8.10, `tests/unit/event-bus-transport.test.ts`. На Redis 8.10.3 группа, не прочитавшая ничего, сохранила 400 из 400 записей при пределе 10; прежний вызов — 100 | На Redis старше 8.2 отставшая больше `EVENT_BUS_STREAM_MAXLEN` группа теряет старые записи, на 8.2+ — больше `EVENT_BUS_STREAM_HARD_MAXLEN`. Убитый процесс оставляет потребителя в группе (MP-K56) |
 | T1.2 читатели журнала в порядке коммитов | сделано | `f34e352` (2.11.0), `0e7e1da` (2.17.0) | `tests/integration/event-commit-order.test.ts`, `tests/unit/semantic-embedding-worker.test.ts` | `idle_in_transaction_session_timeout` — настройка роли БД |
 | T1.3 DDL вне старта | сделано | `281bf17`, `8665d0f`, `a3e6c17` | `tests/integration/runtime-tables.test.ts`: 0 DDL-команд после migrate; 20 из 20 параллельных стартов | — |
 | T1.4 scope продуктовых маршрутов | сделано | `f34e352` (2.11.0) | `tests/unit/product-route-scopes.test.ts` | — |
@@ -42,19 +42,40 @@
 | MP-K44 | `findById` и `find` research-репозитория всегда возвращали ошибку | `54d4653` (4.0.1) | `tests/integration/repository-version-race.test.ts` |
 | — | Две high-уязвимости в `follow-redirects` и `systeminformation` | `05e566b` (2.18.3) | `npm audit --omit=dev --audit-level=high` — код 0 |
 
-## Прогоны на 4.2.0
+## Аудит изменений 2.15.0..4.2.0 (триаж, Red Team), исправлено в 4.3.0
+
+Метод: для каждого изменения ветки — гипотеза отказа, проверка на живых PostgreSQL 16.15, Redis 7.0.15 и Redis 8.10.3, тест, падающий на 4.2.0, затем исправление. Проверено и не подтвердилось: Redis недоступен при старте (обе шины падают одинаково, регрессии нет); обход охраны контейнера расширений через `createChild` и `getServiceInfo` (дочерний контейнер изолирован; намеренный доступ к закрытым полям покрыт оговоркой C9 «не песочница»); двойной `endPool` (ведёт себя как `pool.end()` до 3.0.1); YAML workflow разбирается пакетом `yaml`.
+
+| ID | Важность | Что было | Где введено | Проверка |
+| --- | --- | --- | --- | --- |
+| MP-K49 | высокая, безопасность | Шина Streams по умолчанию теряла `REDIS_TLS`: TLS-only Redis недоступен, иначе пароль и события идут открытым текстом | 3.0.0 (смена умолчания) | `tests/unit/event-bus-transport.test.ts` |
+| MP-K50 | высокая | Одна нечитаемая запись навсегда останавливала поток для группы | 2.13.0, умолчание с 3.0.0 | `tests/integration/redis-streams-bus.test.ts` |
+| MP-K51 | средняя | Счётчик попыток в памяти: обработчик, роняющий процесс, повторялся после каждого рестарта; общий счётчик для одинаковых id разных потоков | 2.13.0, умолчание с 3.0.0 | там же |
+| MP-K52 | средняя | С `ACKED` остановившаяся группа растила поток без предела (5 000 записей при пределе 10) | 3.0.0 | там же |
+| MP-K53 | средняя | Redis, запрещающий `INFO`, не давал ядру стартовать | 3.0.0 | там же |
+| MP-K54 | низкая | `EVENT_BUS_STREAM_MAXLEN=10k`: старт успешен, каждый `XADD` отклонён | 2.13.0, умолчание с 3.0.0 | `tests/unit/event-bus-transport.test.ts` |
+| MP-K55 | низкая | Простаивающая шина: 39 команд/с на тип события на процесс (10 типов — 376/с); стало 2 и 20 | 2.13.0, умолчание с 3.0.0 | `tests/integration/redis-streams-bus.test.ts` |
+| MP-K56 | низкая | Каждая остановка оставляла пустого потребителя в группе | 2.13.0 | там же |
+| MP-K57 | средняя | При выключенном research `IDeepResearchService` зарегистрирован, но не резолвится; гейт не видел — токен в бюджете из-за MP-K35 | 4.0.0 | `tests/unit/ci-gates.test.ts`; resolve-all с ключом-заглушкой |
+| MP-K58 | низкая | `find` research-репозитория восстанавливал всю страницу из журнала разом и без предела страницы | 4.0.1 | `tests/integration/repository-version-race.test.ts` |
+
+Решения аудита: жёсткий предел `XTRIM MAXLEN ~ DELREF` (у `~` Redis ограничивает работу одного вызова 100 узлами потока, исходник `t_stream.c` 8.10.3), а не точный `=`, который на большом хвосте блокирует Redis; счётчик доставок — из `XPENDING`, как требует at-least-once с переживанием рестарта; удвоение паузы вместо блокирующего `XREADGROUP` по всем потокам — одна команда на один ключ, без `CROSSSLOT` на кластерных и прокси-Redis. ADR-0004 дополнен: группа делит события между процессами, Pub/Sub отдавал каждому.
+
+## Прогоны на 4.3.0
 
 | Команда | Результат |
 | --- | --- |
 | `npm run typecheck` (с фикстурой типизированных токенов) | код 0 |
 | `node scripts/ci-di-literals.cjs` | `count=204 max=204` |
-| `npm test` | 110 из 110 |
-| `npm run test:integration`, Redis 7.0.15 | 27 прошли, 2 пропущены (`ACKED`, `IDMP` требуют 8.2/8.6) |
-| `npm run test:integration`, Redis 8.10.3 | 29 из 29 |
+| `npm test` | 115 из 115 |
+| `npm run test:integration`, Redis 7.0.15 | 32 прошли, 4 пропущены (`ACKED`, `IDMP`, жёсткий предел требуют 8.2/8.6) |
+| `npm run test:integration`, Redis 8.10.3 | 36 из 36 |
 | `npm run build` | код 0 |
 | `migrate-cli` на пустой БД дважды | `3 succeeded`, затем `0 succeeded, 0 failed, 3 skipped` |
-| гейты, флаги доменов не заданы | `registered=327 failed=24 budget=27 unexpected=0`; `total=50 protected=43 unexpected=0` |
+| гейты, флаги доменов не заданы | `registered=326 failed=23 budget=27 unexpected=0`; `total=50 protected=43 unexpected=0` |
 | гейты, все домены включены | `registered=367 failed=27 budget=27 unexpected=0`; `total=58 protected=51 unexpected=0` |
+| resolve-all с `OPENAI_API_KEY`-заглушкой, домены выключены / включены | `registered=326 failed=2`; `registered=367 failed=2` (`IUnitOfWork`, `ISandboxPool`) |
+| нагрузка простаивающей шины (`INFO stats`, 5 с) | 1 тип: 39 → 2 команды/с; 10 типов: 376 → 20 |
 | `npm audit --omit=dev --audit-level=high` | код 0, 7 moderate |
 
 Не проверялось: сборка Docker-образа, PostgreSQL 17 локально, реальные провайдеры моделей, установка пакета с github.com.
@@ -67,6 +88,8 @@
 - OneUptime, выбор между Pub/Sub и Streams в Redis (2026-01-25). https://oneuptime.com/blog/post/2026-01-25-redis-pubsub-vs-streams/markdown
 - Conduktor, transactional outbox: relay at-least-once и идемпотентный потребитель. https://www.conduktor.io/glossary/outbox-pattern-for-reliable-event-publishing
 - Kurrent, KurrentDB 25.1: атомарная запись в несколько потоков с ожидаемой версией на поток. https://kurrent.io/releases/kurrentdb/25-1
+- Redis, `XTRIM`: `~` с `LIMIT` по умолчанию 100 узлов потока, `DELREF`. https://redis.io/docs/latest/commands/xtrim/
+- Redis, `XPENDING`: счётчик доставок каждой ожидающей записи. https://redis.io/docs/latest/commands/xpending/
 - Strangler-миграция малыми обратимыми шагами. https://dev.to/oluwatosinolamilekan/from-monolith-to-modular-a-strangler-migration-playbook-527p
 - От модульного монолита к сервисам: модули через интерфейсы. https://dev.to/sepehr/from-monolith-to-modular-monolith-to-microservices-realistic-migration-patterns-36f2
 - Типизированные токены DI: `InjectionToken<T>` в Needle DI, `createToken<T>` в SuperDI. https://jsr.io/@needle-di/core/doc, https://github.com/piex/superdi
@@ -76,7 +99,7 @@
 
 ```text
 Ты работаешь в репозитории KonkovDV/Vesta (пакет microphoenix), база — последний коммит ветки
-с этим файлом (4.2.0). Вход: docs/audit/2026-10-24/02_WORK_PLAN_FOR_AI.md, этот файл (04),
+с этим файлом (4.3.0). Вход: docs/audit/2026-10-24/02_WORK_PLAN_FOR_AI.md, этот файл (04),
 ADR-0004 и ADR-0005, KNOWN_ISSUES.md, docs/claims.md, docs/limitations.md, AGENTS.md.
 
 0. Среда: Node 24, PostgreSQL ≥ 16 с pgvector ≥ 0.8, Redis 7 и Redis ≥ 8.6. Базовая линия с

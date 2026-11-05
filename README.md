@@ -20,7 +20,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 | Field | Value |
 | --- | --- |
-| Version | 4.2.0 (`package.json`) |
+| Version | 4.3.0 (`package.json`) |
 | Runtime | Node.js 24 |
 | Maturity | Self-assessed TRL 4 in the sense of ISO 16290: a component exercised in the laboratory. Not a certificate and not a deployed service. |
 | Status words | `pinned` — a product names a 40-character commit. `ready` — `/health/ready` is 200 with the three real-store flags. Neither word means a model is accurate or a filing was sent. |
@@ -39,7 +39,7 @@ A web client, a collections product, a measured model score, exactly-once delive
 
 - Starts one process: `src/index.ts` calls `runKernel()`.
 - Restores state from an append-only event journal.
-- Publishes through an outbox. The default bus is Redis Streams: an entry stays until a consumer group acknowledges it, and a consumer that starts later still reads it. On Redis 8.2+ trimming keeps unacknowledged entries; on 8.6+ a repeated publish of one event adds one entry. `EVENT_BUS_TRANSPORT=pubsub` restores Pub/Sub, where a publish with no subscriber is lost. ADR-0004.
+- Publishes through an outbox. The default bus is Redis Streams: an entry stays until a consumer group acknowledges it, and a consumer that starts later still reads it. On Redis 8.2+ trimming keeps unacknowledged entries up to a hard cap (`EVENT_BUS_STREAM_HARD_MAXLEN`); on 8.6+ a repeated publish of one event adds one entry. Each event reaches one process of a consumer group; an entry that fails `EVENT_BUS_STREAM_MAX_DELIVERIES` times goes to a dead-letter stream. `EVENT_BUS_TRANSPORT=pubsub` restores Pub/Sub, where a publish with no subscriber is lost. ADR-0004.
 - Lets a project add services, HTTP routes, and SQL migrations without editing the kernel.
 - Registers no product domain (sales, HR, healthcare, research, x402) unless the deployment sets `MODULE_<NAME>_ENABLED=true`. ADR-0005.
 - Refuses to replace a service the kernel already registered.
