@@ -154,6 +154,11 @@ test('findById and find rebuild a saved research report from the journal (MP-K44
     const listed = await repo.find({ researcherId: 'researcher_find' });
     assert.ok(listed.success, listed.success ? '' : listed.error.message);
     assert.deepEqual(listed.data.reports.map((item) => item.id.toValue()), [report.id.toValue()]);
+
+    // Every row costs a journal read now, so one page is at most 100 rows.
+    const huge = await repo.find({ researcherId: 'researcher_find', limit: 100_000 });
+    assert.ok(huge.success, huge.success ? '' : huge.error.message);
+    assert.equal(huge.data.limit, 100);
   } finally {
     await close();
   }

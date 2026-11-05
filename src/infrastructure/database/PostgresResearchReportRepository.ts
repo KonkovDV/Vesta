@@ -150,18 +150,22 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
       const sortOrder = options.sortOrder?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
       query += ` ORDER BY ${sortBy} ${sortOrder}`;
 
-      // Пагинация
-      const limit = options.limit || 10;
-      const offset = options.offset || 0;
+      // Пагинация. Each row costs a journal read (MP-K44), so one page has at most MAX_PAGE rows.
+      const limit = Math.min(Math.max(1, Math.trunc(options.limit || 10)), PostgresResearchReportRepository.MAX_PAGE);
+      const offset = Math.max(0, Math.trunc(options.offset || 0));
       query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
       params.push(limit, offset);
 
       const result = await this.db.query(query, params);
 
-      // Each row names a report; the journal rebuilds it (MP-K44).
-      const rebuilt = await Promise.all(
-        result.rows.map((row) => this.rehydrate(ResearchReportId.fromString((row as { id: string }).id))),
-      );
+      // Each row names a report; the journal rebuilds it (MP-K44), a few at a time so one
+      // page does not take every pool connection.
+      const ids = result.rows.map((row) => ResearchReportId.fromString((row as { id: string }).id));
+      const rebuilt: RepositoryResult<ResearchReport>[] = [];
+      for (let start = 0; start < ids.length; start += PostgresResearchReportRepository.REHYDRATE_CONCURRENCY) {
+        const chunk = ids.slice(start, start + PostgresResearchReportRepository.REHYDRATE_CONCURRENCY);
+        rebuilt.push(...await Promise.all(chunk.map((id) => this.rehydrate(id))));
+      }
       const failed = rebuilt.find((item) => !item.success);
       if (failed && !failed.success) {
         return { success: false, error: failed.error };
@@ -189,6 +193,8 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
   }
 
   private static readonly SNAPSHOT_FREQUENCY = 100;
+  private static readonly MAX_PAGE = 100;
+  private static readonly REHYDRATE_CONCURRENCY = 4;
 
   async save(report: ResearchReport): Promise<RepositoryResult<ResearchReport>> {
     try {
