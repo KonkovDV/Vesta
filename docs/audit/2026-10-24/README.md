@@ -9,4 +9,4 @@ Outputs of the checks behind MP-K11..MP-K38. Produced on Node 24.22.1, PostgreSQ
 | `routes-fixed.txt` | Every route of the live Express app, requested without credentials. A 404 here can be a lost router prefix; see MP-K31/MP-K32 for the checked ones. |
 | `layers.json`, `hazards.json` | ts-morph walk of all 989 files of `e6814bb`: lines, classes, functions, cross-layer imports, empty catches, child_process, setInterval without unref, SQL template interpolation (19 sites, reviewed: none injectable). |
 | `01_AUDIT_REPORT_RU.md`, `02_WORK_PLAN_FOR_AI.md`, `03_findings.json` | The audit report, the work plan through T2.3, and the 51-finding register, as of 2026-10-24. Statuses in `03_findings.json` are from that day; `KNOWN_ISSUES.md` holds the current ones. |
-| `04_PLAN_STATUS.md` | Each plan task checked against the tree on 2026-11-04 (2.18.3): commit, test or command, what is left, and the prompt for the next pass. |
+| `04_PLAN_STATUS.md` | Each plan task checked against the tree on 2026-11-05 (4.2.0): the decisions taken for the owner, commit, test or command, what is left, sources, and the prompt for the next pass. |
