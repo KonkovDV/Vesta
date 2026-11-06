@@ -896,16 +896,15 @@ export class AgentRunService {
         if (!isVersionConflict(error)) {
           throw error;
         }
-        const events = await this.eventStore.getEvents(streamId(runId));
+        const events = await this.eventStore.getEvents(streamId(runId), writer.version + 1);
         const newer = events.filter((item) => (item.aggregateVersion ?? 0) > writer.version);
         if (newer.some((item) => !EXTERNAL_EVENT_TYPES.has(item.type))) {
           throw new AgentRunTakenOverError(runId, finishedResult(runId, events));
         }
-        if (options?.abortOnCancel && newer.some((item) => item.type === 'AgentRunCancelled')) {
-          writer.version = streamVersion(events);
+        writer.version = Math.max(writer.version, streamVersion(events));
+        if (options?.abortOnCancel && events.some((item) => item.type === 'AgentRunCancelled')) {
           return false;
         }
-        writer.version = streamVersion(events);
       }
     }
     throw new AgentRunConflictError(`Agent run ${runId}: could not append ${type}`);

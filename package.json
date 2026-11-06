@@ -1,6 +1,6 @@
 {
   "name": "microphoenix",
-  "version": "4.8.1",
+  "version": "4.8.2",
   "description": "MicroPhoenix - Event Sourcing & Clean Architecture Platform",
   "license": "MIT",
   "engines": {
