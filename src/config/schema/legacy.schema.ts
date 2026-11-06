@@ -52,12 +52,6 @@ export const LegacyConfigSchema = z
     EVENT_STORE_SNAPSHOTS_TABLE: z.string().optional(),
     EVENT_STORE_LOGS: z.string().optional(),
     EVENT_PERSISTENCE_MODE: z.string().optional(),
-    EVENT_STORE_CUTOVER_MODE: z.string().optional(),
-    EVENT_STORE_WRITE_PRIMARY_MODE: z.string().optional(),
- 
-    // Event store partitioning POC (R2.2)
-    EVENT_STORE_PARTITIONING_POC_ENABLED: z.string().optional(),
-    EVENT_STORE_PARTITIONING_POC_EVENTS_TABLE: z.string().optional(),
 
     // MAS Redis Streams pilot (R2.3)
     MAS_REDIS_STREAMS_PILOT_ENABLED: z.string().optional(),
