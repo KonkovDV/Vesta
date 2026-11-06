@@ -24,6 +24,7 @@ These rows are claims about this source tree. They are not a deployment report a
 | C15 | `runKernel()` does not mount `/api/mcp`. `mountMcpHttp` attaches that prefix on the app the caller passes. A request without a key answers 401. The tool-policy agent id is `mcp-http-client`, including when the URL contains `researcher-x`. | `tests/unit/mcp-http-mount.test.ts`. MP-K31. |
 | C7 | Selected outbound calls connect to the addresses `pinUrl` just returned. A later DNS answer is not used for that socket. A redirect is pinned again. | `src/infrastructure/http/SsrfPinnedHttpClient.ts`. Call sites in this tree: ingestion in `memory.module.ts`, `A2AX402PaymentAdapters.ts`, `ContainerRegistryAdapter.ts`, `A2ATaskRunnerAdapter.ts`, `A2AStreamTransportAdapter.ts`, and outbound MCP over HTTP (`McpToolConsumerAdapter`, `tests/unit/mcp-consumer-pin.test.ts`). The `web-browser` plugin checks but Chrome resolves names itself. A validator without `pinUrl` is not this claim. |
 | C18 | A document URL the SSRF guard blocks answers 400 from ingestion. A private literal host is refused before the HTTP client runs. An unexpected ingestion failure stays 500. | `tests/unit/ingestion-ssrf-status.test.ts`. V-46. |
+| C19 | A tool profile is the exact registered agent id. `researcher` may use `read_file`. `researcher-x` and `researcher.x` may use `session_status` only. | `tests/unit/tool-policy-service.test.ts`. V-48, MP-K60. |
 
 ## Words that are not claims
 

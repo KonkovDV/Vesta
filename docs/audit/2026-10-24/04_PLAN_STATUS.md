@@ -99,7 +99,7 @@
 
 ```text
 Ты работаешь в репозитории KonkovDV/Vesta (пакет microphoenix), база — последний коммит ветки
-с этим файлом (4.7.0). Вход: docs/audit/2026-10-24/02_WORK_PLAN_FOR_AI.md, этот файл (04),
+с этим файлом (4.8.0). Вход: docs/audit/2026-10-24/02_WORK_PLAN_FOR_AI.md, этот файл (04),
 ADR-0004 и ADR-0005, KNOWN_ISSUES.md, docs/claims.md, docs/limitations.md, AGENTS.md.
 
 0. Среда: Node 24, PostgreSQL ≥ 16 с pgvector ≥ 0.8, Redis 7 и Redis ≥ 8.6. Базовая линия с
@@ -113,7 +113,7 @@ ADR-0004 и ADR-0005, KNOWN_ISSUES.md, docs/claims.md, docs/limitations.md, AGEN
    tests/gates/di-literal-budget.json до нового счёта. Потолок только вниз.
 3. MP-K35 закрыт в 4.5.0. Потолок resolve-all — `IUnitOfWork` и `ISandboxPool`. Дальше только вниз.
 4. T2.4 из реестра 03: V-45 закрыт в 4.5.0, V-46 закрыт в 4.6.0 (блок SSRF при загрузке отвечает 400).
-5. MP-K26: десятиминутный бан только при заданном `TRUST_PROXY` (4.5.0). Запрос с `Authorization` получает своё ведро по хешу заголовка (4.7.0). Анонимные запросы на одном `req.ip` по-прежнему делят ведро. MP-K41 закрыт в 4.7.0: id рецензента — пользователь ключа.
+5. MP-K26: десятиминутный бан только при заданном `TRUST_PROXY` (4.5.0). Запрос с `Authorization` получает своё ведро по хешу заголовка (4.7.0). Анонимные запросы на одном `req.ip` по-прежнему делят ведро. MP-K41 закрыт в 4.7.0: id рецензента — пользователь ключа. MP-K60 закрыт в 4.8.0: профиль инструмента — точное имя роли. MP-K61 закрыт в 4.8.0: проверка БД и Redis до DI — deferred.
 6. Каждая задача: тест, падающий на текущем коде, затем исправление. Одна задача — один коммит;
    CHANGELOG, KNOWN_ISSUES, claims/limitations, версия в package.json, package-lock.json,
    Dockerfile, README, README_RU. Перед коммитом зелёные typecheck, тесты, build. Обновить этот файл.

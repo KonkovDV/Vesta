@@ -21,6 +21,17 @@ export interface CheckResult {
   durationMs?: number;
 }
 
+export interface CheckReport {
+  name: string;
+  passed: boolean;
+  /** Config was present and the connection was not attempted. Not a pass and not a failure. */
+  deferred: boolean;
+  severity: CheckSeverity;
+  message: string;
+  durationMs: number;
+  details?: Record<string, unknown>;
+}
+
 export type CheckSeverity = 'critical' | 'warning' | 'info';
 
 export interface IntegrityCheck {
@@ -38,15 +49,6 @@ export interface BootstrapResult {
   durationMs: number;
   failedCritical: string[];
   failedWarnings: string[];
-}
-
-export interface CheckReport {
-  name: string;
-  passed: boolean;
-  severity: CheckSeverity;
-  message: string;
-  durationMs: number;
-  details?: Record<string, unknown>;
 }
 
 export abstract class BaseIntegrityCheck implements IntegrityCheck {
@@ -75,6 +77,10 @@ export abstract class BaseIntegrityCheck implements IntegrityCheck {
 
   protected pass(message: string, details?: Record<string, unknown>): CheckResult {
     return { passed: true, message, details };
+  }
+
+  protected defer(message: string, details?: Record<string, unknown>): CheckResult {
+    return { passed: false, message, details: { ...details, status: 'deferred' } };
   }
 
   protected fail(message: string, details?: Record<string, unknown>): CheckResult {
@@ -124,16 +130,22 @@ export class SystemIntegrityChecker {
         const result = await this.runCheckWithTimeout(check);
         const durationMs = Number(process.hrtime.bigint() - checkStart) / 1e6;
 
+        const deferred = result.details?.status === 'deferred';
         report = {
           name: check.name,
-          passed: result.passed,
+          passed: result.passed && !deferred,
+          deferred,
           severity: check.severity,
           message: result.message,
           durationMs,
           details: result.details,
         };
 
-        if (!result.passed) {
+        if (deferred) {
+          this.logger.warn(`[SystemIntegrity] ${check.name} deferred (${durationMs.toFixed(2)}ms)`, {
+            message: result.message,
+          });
+        } else if (!result.passed) {
           if (check.severity === 'critical') {
             failedCritical.push(check.name);
             this.logger.error(`[SystemIntegrity] CRITICAL check failed: ${check.name}`, {
@@ -157,6 +169,7 @@ export class SystemIntegrityChecker {
         report = {
           name: check.name,
           passed: false,
+          deferred: false,
           severity: check.severity,
           message: `Check threw exception: ${errorMessage}`,
           durationMs,
@@ -183,7 +196,8 @@ export class SystemIntegrityChecker {
     this.logger.info(`[SystemIntegrity] Checks completed in ${durationMs.toFixed(2)}ms`, {
       total: this.checks.length,
       passed: reports.filter(r => r.passed).length,
-      failed: reports.filter(r => !r.passed).length,
+      deferred: reports.filter(r => r.deferred).length,
+      failed: reports.filter(r => !r.passed && !r.deferred).length,
       failedCritical: failedCritical.length,
       failedWarnings: failedWarnings.length,
     });

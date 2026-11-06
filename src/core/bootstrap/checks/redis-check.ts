@@ -40,8 +40,7 @@ export class RedisCheck extends BaseIntegrityCheck {
       if (!container.isRegistered('RedisClient')) {
         // In Phase 0 (Pre-Bootstrap), DI is not ready yet.
         // We validate that config is present (checked above), but skip connectivity check.
-        return this.pass('Redis config present (connectivity check deferred until DI bootstrap)', {
-            status: 'deferred',
+        return this.defer('Redis config present (connectivity check deferred until DI bootstrap)', {
             reason: 'DI container not yet populated',
         });
       }

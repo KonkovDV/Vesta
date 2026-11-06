@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.8.0
+
+- A tool profile is the exact registered agent id. `researcher-x`, `researcher.x`, and `architect-1` stay on the minimal profile. MP-K60. `tests/unit/tool-policy-service.test.ts`.
+- A pre-bootstrap database or Redis check with configuration and no client is deferred. The report and the metric say deferred. Startup continues. MP-K61. `tests/unit/integrity-deferred.test.ts`.
+
 ## 4.7.0
 
 - An MRI review stores the authenticated user as the reviewer id. A `reviewerId` in the body is not stored. A review without an authenticated user answers 401. The clinical role stays the text the caller sends. MP-K41. `tests/unit/mri-review-identity.test.ts`.
