@@ -39,7 +39,7 @@ The table is the 4.0.0 measurement. The 4.3.0 resolve-all gate with the flags un
 ## Consequences
 
 - A deployment that served sales, HR, or healthcare routes, or used research or x402 services, sets the matching flag when it moves to 4.0.0. That is why this is a major version.
-- `tests/gates/resolve-all-budget.json` keeps its 27 names, because the all-on run still needs them.
+- `tests/gates/resolve-all-budget.json` listed 27 names at 4.0.0 because the all-on run still needed them. Since 4.5.0 the list is `IUnitOfWork` and `ISandboxPool`: the integration job registered the other 25.
 - Code that resolves a product token in a deployment with that domain off fails at resolve time with the token name, rather than running a service nobody configured.
 
 ## Sources

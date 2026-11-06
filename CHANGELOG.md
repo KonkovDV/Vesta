@@ -3,8 +3,9 @@
 ## 4.5.0
 
 - `USE_MOCK_AI=true` makes `LLMAdapterFactory` return a local adapter that does not call a provider. The text is empty and `metadata.mock` is true. Without the flag and without a key the factory still throws. MP-K35. `tests/unit/llm-adapter-factory-mock.test.ts`.
-- `GET /health/migration` requires the same authentication as `/health/detailed`. It no longer answers to an anonymous caller. `tests/unit/health-migration-auth.test.ts`.
+- `GET /health/migration` requires the same authentication as `/health/detailed`. It no longer answers to an anonymous caller. On the integration job the domains-off walk is 50 routes and 44 protected; with every domain on it is 58 and 52. `tests/unit/health-migration-auth.test.ts`.
 - The ingress penalty ban of ten minutes runs only when `TRUST_PROXY` is set. `TRUST_PROXY` is now part of the configuration schema, so Express can trust the proxy hop. Without it, the shared address still receives 429 and is not banned. MP-K26. `tests/unit/rate-limiter-penalty.test.ts`.
+- The resolve-all ceiling is `IUnitOfWork` and `ISandboxPool`. Integration run 42263561228 failed those two in every mode and resolved the other 25 names from the previous list.
 
 ## 4.4.0
 
