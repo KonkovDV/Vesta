@@ -8,6 +8,7 @@ export const LegacyConfigSchema = z
     // HTTP / app
     ENABLE_HTTP: z.string().optional(),
     HTTP_LOG_START: z.string().optional(),
+    TRUST_PROXY: z.string().optional(),
     ALLOWED_ORIGINS: z.string().optional(),
     ALLOWED_METHODS: z.string().optional(),
     ALLOWED_HEADERS: z.string().optional(),

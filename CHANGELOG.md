@@ -1,5 +1,11 @@
 # Changelog
 
+## 4.5.0
+
+- `USE_MOCK_AI=true` makes `LLMAdapterFactory` return a local adapter that does not call a provider. The text is empty and `metadata.mock` is true. Without the flag and without a key the factory still throws. MP-K35. `tests/unit/llm-adapter-factory-mock.test.ts`.
+- `GET /health/migration` requires the same authentication as `/health/detailed`. It no longer answers to an anonymous caller. `tests/unit/health-migration-auth.test.ts`.
+- The ingress penalty ban of ten minutes runs only when `TRUST_PROXY` is set. `TRUST_PROXY` is now part of the configuration schema, so Express can trust the proxy hop. Without it, the shared address still receives 429 and is not banned. MP-K26. `tests/unit/rate-limiter-penalty.test.ts`.
+
 ## 4.4.0
 
 - The x402 payment adapters and payment services are imported only when `MODULE_X402_ENABLED` is true. With the flag unset they are not in the process module cache. A2A task running stays loaded. Sales, HR, healthcare, and research are still imported while off. RSS was not measured. ADR-0005, T2.1 step 2. `tests/unit/x402-lazy-import.test.ts`.

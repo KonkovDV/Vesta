@@ -1,5 +1,6 @@
 
 import type { Request, Response, NextFunction } from 'express-serve-static-core';
+import { readStr } from '../../core/config/app-config';
 // import Redis from 'ioredis'; // Use if real Redis is available. For now using Memory Fallback to ensure reliability if user has no Redis.
 
 // Implementation of "Penalty Box" Rate Limiter
@@ -67,7 +68,10 @@ export function rateLimiterMiddleware(req: Request, res: Response, next: NextFun
   } else {
     // 4. Violation
     client.violations++;
-    if (client.violations > 5) { // 5 violations = Penalty Box
+    // A 10-minute ban on req.ip bans every client that shares a proxy address
+    // when TRUST_PROXY is unset, because Express then reports the proxy.
+    const trustProxy = readStr('TRUST_PROXY', '') ?? '';
+    if (client.violations > 5 && trustProxy.trim().length > 0) {
       client.bannedUntil = now + (10 * 60 * 1000); // 10 min ban
       client.violations = 0; // Reset violations for next time, but they are banned now
       res.status(403).json({ error: 'Access Denied: Penalty Box Activated' });

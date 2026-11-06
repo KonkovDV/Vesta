@@ -110,7 +110,7 @@ ADR-0004 и ADR-0005, KNOWN_ISSUES.md, docs/claims.md, docs/limitations.md, AGEN
 2. T2.3 шаг 2: перевести на container.inject модули, которые резолвят публичные порты, снизить
    tests/gates/di-literal-budget.json до нового счёта. Потолок только вниз.
 3. MP-K35: LLMAdapterFactory учитывает USE_MOCK_AI=true; бюджет resolve-all — только вниз.
-4. T2.4 из реестра 03: V-45 (/health/migration без ключа), V-46 (блок SSRF при загрузке → 4xx).
+4. T2.4 из реестра 03: V-45 закрыт в 4.5.0 (`GET /health/migration` требует ключ). Остаётся V-46 (блок SSRF при загрузке → 4xx).
 5. MP-K26: штрафная блокировка лимитера при отсутствии TRUST_PROXY.
 6. Каждая задача: тест, падающий на текущем коде, затем исправление. Одна задача — один коммит;
    CHANGELOG, KNOWN_ISSUES, claims/limitations, версия в package.json, package-lock.json,

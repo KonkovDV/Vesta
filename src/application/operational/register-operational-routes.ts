@@ -239,7 +239,7 @@ export function registerOperationalRoutes(
     }
   });
 
-  app.get('/health/migration', async (_req: ExpressRequest, res: ExpressResponse) => {
+  app.get('/health/migration', authMw, async (_req: ExpressRequest, res: ExpressResponse) => {
     try {
       const migration = await healthCheckService.checkMigrationStatus();
 
