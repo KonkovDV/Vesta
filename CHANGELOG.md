@@ -4,6 +4,7 @@
 
 - A tool profile is the exact registered agent id. `researcher-x`, `researcher.x`, and `architect-1` stay on the minimal profile. MP-K60. `tests/unit/tool-policy-service.test.ts`.
 - A pre-bootstrap database or Redis check with configuration and no client is deferred. The report and the metric say deferred. Startup continues. MP-K61. `tests/unit/integrity-deferred.test.ts`.
+- CodeQL actions are pinned at 4.39.2. `CITATION.cff` names package 4.8.0 and says to cite the pinned commit plus `docs/claims.md`.
 
 ## 4.7.0
 
