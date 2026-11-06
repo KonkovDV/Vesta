@@ -1,0 +1,48 @@
+# ADR-0005: Product domains are off by default
+
+- **Status:** Accepted
+- **Date:** 2026-11-05
+- **Related:** ADR-0001 (package), ADR-0003 (what stays in the kernel), MP-K32, MP-K38
+
+## Context
+
+ADR-0003 keeps a rule in this repository only when it is about the process, the journal, the outbox, the schedule, the tool-call gate, or the way a project attaches. This tree still holds five product domains: sales, HR, healthcare (MRI second opinion and its ingestion and delivery workers), research reports, and x402 paid A2A execution (MP-K38). Until 4.0.0 `runKernel()` registered their services, started the healthcare workers, and mounted `/api/v1/sales`, `/api/v1/hr`, and `/api/v1/healthcare` in every deployment, whether it used them or not. Those routes answered without a scope check until 2.11.0 (MP-K32).
+
+Moving five domains into product repositories at once would be a rewrite. The usual way out of a monolith is incremental: identify the core, extract one capability at a time while the system keeps running, keep each step small and reversible, and let modules meet through interfaces so that extraction swaps an implementation without touching callers. The kernel already has that interface: a product is a `KernelExtension` that registers services, adds routes, and passes SQL to `microphoenix-migrate --dir`.
+
+## Decision
+
+Step 1, in 4.0.0:
+
+1. Each product domain is off unless the deployment sets its flag to `true` (or `1`): `MODULE_SALES_ENABLED`, `MODULE_HR_ENABLED`, `MODULE_HEALTHCARE_ENABLED`, `MODULE_RESEARCH_ENABLED`, `MODULE_X402_ENABLED`. The research and healthcare names existed and defaulted to on; now every flag defaults to off.
+2. Off means: no use cases, no controllers, no infrastructure services, no workers, no routes for that domain. `src/config/product-domains.ts` is the only place that reads the flags.
+3. With every flag on, the kernel registers and mounts what 3.0.1 did. CI runs the resolve-all and route gates both ways.
+
+Step 2, started: the x402 payment adapters and payment services are imported only inside the branch that runs when `MODULE_X402_ENABLED` is true (`tests/unit/x402-lazy-import.test.ts`). A2A task running stays in the kernel import graph. Sales, HR, healthcare, and research code are still imported when their flags are off. RSS was not measured for this slice.
+
+## Measured
+
+Kernel booted with the CI gate environment on PostgreSQL 16 and Redis 7, three boots each:
+
+| | 3.0.1 | 4.0.0, flags unset | 4.0.0, all flags on |
+| --- | --- | --- | --- |
+| Registered DI tokens | 367 | 327 | 367 |
+| Tokens that do not resolve (`USE_MOCK_AI=true`) | 27 | 24 | 27 |
+| Mounted routes | 58 | 50 | 58 |
+| Loaded modules (`require.cache`) | 3779 | 3776 | — |
+| RSS after 5 s, MB | 353–396 | 372–394 | — |
+
+Step 1 shrinks what a deployment exposes and runs. It does not shrink memory or the import graph: the product modules are still imported. The memory target of T2.1 needs step 2.
+
+The table is the 4.0.0 measurement. The 4.3.0 resolve-all gate with the flags unset registered 326 tokens, not 327: `IDeepResearchService` is registered only when the research domain is on (MP-K57). Routes stayed 50.
+
+## Consequences
+
+- A deployment that served sales, HR, or healthcare routes, or used research or x402 services, sets the matching flag when it moves to 4.0.0. That is why this is a major version.
+- `tests/gates/resolve-all-budget.json` listed 27 names at 4.0.0 because the all-on run still needed them. Since 4.5.0 the list is `IUnitOfWork` and `ISandboxPool`: the integration job registered the other 25.
+- Code that resolves a product token in a deployment with that domain off fails at resolve time with the token name, rather than running a service nobody configured.
+
+## Sources
+
+- Fowler, *StranglerFigApplication*, 29 June 2004. A new path is added beside the old one and the old path shrinks; the system keeps running. https://martinfowler.com/bliki/StranglerFigApplication.html
+- The interface this step uses is already in the kernel: `KernelExtension` registers services, adds routes, and passes SQL to `microphoenix-migrate --dir` (ADR-0001, ADR-0003). The flag is the reversible first cut. It is not evidence that the import graph shrank.

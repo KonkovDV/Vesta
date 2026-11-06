@@ -202,6 +202,7 @@ export class MriSecondOpinionCase extends AggregateRoot<MriSecondOpinionCaseProp
     const event = createMriHumanReviewCompletedEvent(this.id, nextVersion, {
       disposition: {
         reviewerRole: disposition.reviewerRole,
+        reviewerId: disposition.reviewerId,
         decision: disposition.decision,
         reviewedAt: disposition.reviewedAt.toISOString(),
         ...(disposition.modifications ? { modifications: disposition.modifications } : {}),
@@ -360,6 +361,7 @@ export class MriSecondOpinionCase extends AggregateRoot<MriSecondOpinionCaseProp
       humanReview: this.props.humanReview
         ? {
             reviewerRole: this.props.humanReview.reviewerRole,
+            reviewerId: this.props.humanReview.reviewerId,
             decision: this.props.humanReview.decision,
             reviewedAt: this.props.humanReview.reviewedAt.toISOString(),
           }

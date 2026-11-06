@@ -5,6 +5,7 @@ import {
   SecondOpinionAssessmentSchema,
 } from '../../../../core/events/mri-second-opinion.schemas';
 import { RequestContext } from '../../../../application/context/request-context';
+import type { AuthenticatedRequest } from '../../../../application/middleware/auth';
 import { DomainError } from '../../../../domain/errors/DomainError';
 import { CompleteMriHumanReviewUseCase } from '../../../../application/services/CompleteMriHumanReviewUseCase';
 import { HumanReviewDisposition } from '../../../../domain/healthcare/value-objects/HumanReviewDisposition';
@@ -61,10 +62,22 @@ export class CompleteMriHumanReviewController {
         return;
       }
 
+      const reviewerId = (req as AuthenticatedRequest).authContext?.userId?.trim() ?? '';
+      if (reviewerId.length === 0) {
+        res.status(401).json({
+          error: { code: 'UNAUTHORIZED', message: 'review requires an authenticated user' },
+        });
+        return;
+      }
+
       const result = await this.useCase.execute({
         caseId,
         disposition: HumanReviewDisposition.create({
-          ...dispositionResult.data,
+          reviewerRole: dispositionResult.data.reviewerRole,
+          reviewerId,
+          decision: dispositionResult.data.decision,
+          modifications: dispositionResult.data.modifications,
+          clinicalNotes: dispositionResult.data.clinicalNotes,
           reviewedAt: new Date(dispositionResult.data.reviewedAt),
         }),
         finalAssessment: assessmentResult.data

@@ -128,6 +128,13 @@ export interface PublishResult {
 export interface OutboxSaveOptions {
   /** All events belong to one aggregate whose stored version must equal this. */
   expectedAggregateVersion?: number;
+  /**
+   * Stored version each listed aggregate must have, checked for every aggregate
+   * before any event is written; one mismatch throws ConcurrencyError and the batch
+   * writes nothing. An aggregate of the batch that is not listed is appended after
+   * its stored version. This is a multi-stream append with an expected revision per stream.
+   */
+  expectedAggregateVersions?: Readonly<Record<string, number>>;
 }
 
 export interface IOutbox {

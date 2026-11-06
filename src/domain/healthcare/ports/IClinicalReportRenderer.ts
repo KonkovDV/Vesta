@@ -13,6 +13,7 @@ export interface RenderClinicalReportInput {
   readonly outcome: 'delivered' | 'withdrawn' | 'expired';
   readonly modelId?: string;
   readonly reviewerRole?: string;
+  readonly reviewerId?: string;
   readonly reviewerDecision?: 'accepted' | 'modified' | 'rejected' | 'escalated';
   readonly safetyFlags: readonly SafetyFlag[];
 }

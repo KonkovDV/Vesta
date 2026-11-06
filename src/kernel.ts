@@ -17,6 +17,9 @@ import type { IToolExecutionPolicy } from './domain/security/tool-execution-poli
 export * from './ai-types';
 export type { HttpRouteRegistrar, HttpRouteRegistrationContext } from './application/app';
 export type { DIContainer } from './core/di/container';
+export { createToken } from './core/di/injection-token';
+export type { InjectionToken, TokenType } from './core/di/injection-token';
+export { KernelTokens } from './kernel-tokens';
 export {
   CORE_MIGRATIONS_DIR,
   listMigrationFiles,
@@ -106,7 +109,8 @@ const EXTENSION_BLOCKED_METHODS: ReadonlySet<PropertyKey> = new Set([
 export function createExtensionContainer(container: DIContainer, extensionName: string): DIContainer {
   const guarded: DIContainer = new Proxy(container, {
     get(target, property) {
-      if (property === 'register') {
+      // provide() is register() with a typed token; both go through this guard (C9).
+      if (property === 'register' || property === 'provide') {
         return (token: string | symbol, factory: (c: DIContainer) => unknown, options?: unknown) => {
           if (target.isRegistered(token)) {
             throw new KernelExtensionError(
@@ -384,6 +388,10 @@ export async function runKernel(options: KernelOptions = {}): Promise<{ app: unk
     const { safeParseInt } = await import('./core/config/safe-parse');
     const { bootstrapApplication } = await import('./core/bootstrap/orchestrator');
     const { bootstrap: infrastructureBootstrap } = await import('./infrastructure/di/bootstrap');
+    const { PRODUCT_DOMAINS, productDomainEnabled } = await import('./config/product-domains');
+    const domainsOn = PRODUCT_DOMAINS.filter((domain) => productDomainEnabled(domain));
+    // Since 4.0.0 each domain needs MODULE_<NAME>_ENABLED=true; an upgrade that missed it shows "none" here.
+    console.log(`[EntryPoint] Product domains on: ${domainsOn.length > 0 ? domainsOn.join(', ') : 'none'} (ADR-0005)`);
 
     const result = await bootstrapApplication({
       infrastructure: {

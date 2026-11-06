@@ -7,7 +7,7 @@ import {
 } from '../../domain/persistence/IUnitOfWork';
 import type { TransactionOptions as DbTransactionOptions } from '../../domain/persistence/IDatabaseConnection';
 // container import removed - TASK-002: using constructor injection instead
-import type { IOutbox } from '../../domain/events/outbox.interface';
+import type { IOutbox, OutboxSaveOptions } from '../../domain/events/outbox.interface';
 import type { IEventStore } from '../../domain/events/event-store.interface';
 // PostgreSQLOutbox import removed to break circular dependency
 import { requireActivePgClient } from './PgClientContext';
@@ -35,7 +35,34 @@ interface UowState {
 }
 
 interface TransactionalOutbox extends IOutbox {
-  saveEventsWithOutboxInTxClient(client: PoolClient, events: DomainEvent[]): Promise<void>;
+  saveEventsWithOutboxInTxClient(
+    client: PoolClient,
+    events: DomainEvent[],
+    transactionId?: string,
+    options?: OutboxSaveOptions,
+  ): Promise<unknown>;
+}
+
+/**
+ * The journal head each aggregate's events were decided on (MP-K40): the first
+ * event's aggregateVersion minus one, when every event of that aggregate carries a
+ * version of at least 1 without a gap. An aggregate whose events carry 0 ("the store
+ * numbers it"), or an irregular run, is appended after whatever version is stored.
+ */
+export function decidedJournalHeads(events: readonly DomainEvent[]): Record<string, number> {
+  const byAggregate = new Map<string, number[]>();
+  for (const event of events) {
+    const versions = byAggregate.get(event.aggregateId) ?? [];
+    versions.push(event.aggregateVersion);
+    byAggregate.set(event.aggregateId, versions);
+  }
+  const heads: Record<string, number> = {};
+  for (const [aggregateId, versions] of byAggregate) {
+    const decided = versions.every((version, index) =>
+      Number.isInteger(version) && version >= 1 && version === versions[0] + index);
+    if (decided) heads[aggregateId] = versions[0] - 1;
+  }
+  return heads;
 }
 
 function isTransactionalOutbox(value: IOutbox | undefined): value is TransactionalOutbox {
@@ -361,7 +388,14 @@ export class PostgresUnitOfWork implements IUnitOfWork, IDisposable {
     }
 
     if (isTransactionalOutbox(this.outbox)) {
-      await this.outbox.saveEventsWithOutboxInTxClient(client, allEvents);
+      // One batch for every aggregate of this scope: all are checked, then all are written.
+      const expectedAggregateVersions = decidedJournalHeads(allEvents);
+      await this.outbox.saveEventsWithOutboxInTxClient(
+        client,
+        allEvents,
+        undefined,
+        Object.keys(expectedAggregateVersions).length > 0 ? { expectedAggregateVersions } : undefined,
+      );
     } else if (this.eventStore) {
       await this.eventStore.saveEvents(allEvents, {
         transactional: true,

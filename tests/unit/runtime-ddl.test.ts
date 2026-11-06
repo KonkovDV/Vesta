@@ -4,6 +4,41 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import type { IDatabaseConnection } from '../../src/domain/persistence/IDatabaseConnection';
 import { requirePublicTables, runtimeDdlEnabled } from '../../src/infrastructure/database/runtime-ddl';
+import { PostgresSkillRelationGraphAdapter } from '../../src/infrastructure/agents/PostgresSkillRelationGraphAdapter';
+import { PostgresFeatureFlagsStore } from '../../src/infrastructure/feature-flags/PostgresFeatureFlagsStore';
+import { PostgresSpendStateStore } from '../../src/infrastructure/finops/PostgresSpendStateStore';
+import { MasReadModelsRepository } from '../../src/infrastructure/mas/MasEventsRedisStreamsProjector';
+
+/** A database without any table. Every statement is recorded and answers no rows. */
+function emptyDatabase(): { db: IDatabaseConnection; sent: string[] } {
+  const sent: string[] = [];
+  const db = {
+    async query(sql: string) { sent.push(sql); return { rows: [], rowCount: 0 }; },
+    async queryOne(sql: string) { sent.push(sql); return null; },
+    async execute(sql: string) { sent.push(sql); return 0; },
+    async transaction<T>(work: () => Promise<T>) { return work(); },
+  };
+  return { db: db as unknown as IDatabaseConnection, sent };
+}
+
+async function withRuntimeDdl<T>(value: string | undefined, work: () => Promise<T>): Promise<T> {
+  const previous = process.env.DB_RUNTIME_DDL;
+  if (value === undefined) delete process.env.DB_RUNTIME_DDL;
+  else process.env.DB_RUNTIME_DDL = value;
+  try {
+    return await work();
+  } finally {
+    if (previous === undefined) delete process.env.DB_RUNTIME_DDL;
+    else process.env.DB_RUNTIME_DDL = previous;
+  }
+}
+
+const firstUse: Array<[string, (db: IDatabaseConnection) => Promise<unknown>]> = [
+  ['skill relations', (db) => new PostgresSkillRelationGraphAdapter(db).getRelations({ skillId: 'probe' })],
+  ['feature flags', (db) => new PostgresFeatureFlagsStore(db).loadFlags()],
+  ['finops spend state', (db) => new PostgresSpendStateStore(db).listScopeIds()],
+  ['MAS read models', (db) => new MasReadModelsRepository(db).initialize()],
+];
 
 test('runtime DDL stays off unless the flag is true', () => {
   const previous = process.env.DB_RUNTIME_DDL;
@@ -51,4 +86,44 @@ test('the runtime migration names the learning and error-graph tables', () => {
     assert.match(sql, new RegExp(name));
   }
   assert.equal(sql.includes('CONCURRENTLY'), false);
+});
+
+test('a store that created its tables on first use asks for migrations instead', async () => {
+  await withRuntimeDdl(undefined, async () => {
+    for (const [name, use] of firstUse) {
+      const { db, sent } = emptyDatabase();
+      await assert.rejects(use(db), /Apply migrations/, name);
+      assert.deepEqual(sent.filter((sql) => /\b(CREATE|ALTER)\b/i.test(sql)), [], name);
+    }
+  });
+});
+
+test('the first-use migration names the skill-graph and finops tables', () => {
+  const sql = readFileSync(
+    path.join(__dirname, '../../src/infrastructure/database/migrations/003_skill_graph_finops.sql'),
+    'utf8',
+  );
+  for (const name of [
+    'skill_relations',
+    'skill_taxonomy',
+    'skill_divisions',
+    'skill_division_members',
+    'idx_skill_relations_source',
+    'idx_skill_relations_target',
+    'idx_skill_relations_confidence',
+    'finops.agent_spend_state',
+  ]) {
+    assert.match(sql, new RegExp(name));
+  }
+  assert.equal(sql.includes('CONCURRENTLY'), false);
+});
+
+test('with DB_RUNTIME_DDL=true the MAS read models use the baseline text ids', async () => {
+  await withRuntimeDdl('true', async () => {
+    const { db, sent } = emptyDatabase();
+    await new MasReadModelsRepository(db).initialize();
+    const creates = sent.filter((sql) => /CREATE TABLE/i.test(sql));
+    assert.equal(creates.length, 2);
+    for (const sql of creates) assert.doesNotMatch(sql, /\bUUID\b/i);
+  });
 });

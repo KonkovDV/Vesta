@@ -11,6 +11,7 @@ import { DomainInvariantViolationError } from '../../errors/DomainError';
  *
  * Invariants:
  * - reviewerRole must be non-empty
+ * - reviewerId is the authenticated principal and must be non-empty
  * - decision must be a valid enum value
  * - reviewedAt must be a valid ISO 8601 datetime
  */
@@ -19,6 +20,7 @@ export type ReviewDecision = 'accepted' | 'modified' | 'rejected' | 'escalated';
 
 interface HumanReviewDispositionProps {
   readonly reviewerRole: string;
+  readonly reviewerId: string;
   readonly decision: ReviewDecision;
   readonly modifications?: string;
   readonly clinicalNotes?: string;
@@ -32,12 +34,14 @@ export class HumanReviewDisposition extends ValueObject<HumanReviewDispositionPr
 
   static create(props: {
     reviewerRole: string;
+    reviewerId: string;
     decision: ReviewDecision;
     modifications?: string;
     clinicalNotes?: string;
     reviewedAt: Date;
   }): HumanReviewDisposition {
     const trimmedRole = props.reviewerRole.trim();
+    const reviewerId = props.reviewerId.trim();
 
     if (trimmedRole.length === 0) {
       throw new DomainInvariantViolationError(
@@ -46,9 +50,17 @@ export class HumanReviewDisposition extends ValueObject<HumanReviewDispositionPr
         {}
       );
     }
+    if (reviewerId.length === 0) {
+      throw new DomainInvariantViolationError(
+        'REVIEW_EMPTY_REVIEWER',
+        'Reviewer id must be the authenticated user',
+        {}
+      );
+    }
 
     return new HumanReviewDisposition({
       reviewerRole: trimmedRole,
+      reviewerId,
       decision: props.decision,
       modifications: props.modifications?.trim(),
       clinicalNotes: props.clinicalNotes?.trim(),
@@ -57,6 +69,7 @@ export class HumanReviewDisposition extends ValueObject<HumanReviewDispositionPr
   }
 
   get reviewerRole(): string { return this.props.reviewerRole; }
+  get reviewerId(): string { return this.props.reviewerId; }
   get decision(): ReviewDecision { return this.props.decision; }
   get modifications(): string | undefined { return this.props.modifications; }
   get clinicalNotes(): string | undefined { return this.props.clinicalNotes; }

@@ -337,11 +337,12 @@ export class RedisAdapter implements ICache {
 
     try {
       const prefixedKeys = keys.map(key => this.addPrefix(key));
-      const results = await this.client.exists(...prefixedKeys);
+      // EXISTS with several keys returns how many exist, not which ones (MP-K46).
+      // One EXISTS per key; the client sends them on one connection without waiting.
+      const counts = await Promise.all(prefixedKeys.map((key) => this.client.exists(key)));
       this.totalOperations += keys.length;
 
-      // Redis EXISTS возвращает число, нужно преобразовать в массив булевых значений
-      return prefixedKeys.map((_, index) => (results & (1 << index)) !== 0);
+      return counts.map((count) => count > 0);
 
     } catch (error) {
       console.error(`[Redis] EXISTS MANY error:`, error);

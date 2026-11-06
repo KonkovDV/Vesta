@@ -74,11 +74,17 @@ function unexpectedOpenRoutes(results, allowlist) {
   return unexpected;
 }
 
+/**
+ * A token outside the budget fails the gate. So does a budgeted token whose
+ * dependency is not registered: that is wiring, never the environment, and the
+ * budget must not hide it (IDeepResearchService with research off, 4.2.1).
+ */
 function unexpectedResolveFailures(failures, budget) {
   const allowed = new Set(budget);
   const unexpected = [];
   for (const row of failures) {
-    if (!allowed.has(row.token)) unexpected.push(row.token);
+    const missingDependency = /^Service not registered: /.test(String(row.message || ''));
+    if (!allowed.has(row.token) || missingDependency) unexpected.push(row.token);
   }
   return unexpected;
 }
@@ -104,7 +110,15 @@ function applyGateEnv(overrides) {
   for (const [key, value] of Object.entries(overrides || {})) process.env[key] = value;
 }
 
+/** resolve('Name') or resolve<T>('Name'): a token the compiler cannot check (T2.3). */
+const STRING_RESOLVE = /\.resolve(?:<[^()]*>)?\(\s*['"`]/g;
+
+function countStringResolves(source) {
+  return (String(source).match(STRING_RESOLVE) || []).length;
+}
+
 module.exports = {
+  countStringResolves,
   installRoutePathCapture,
   joinRoute,
   walkExpressStack,

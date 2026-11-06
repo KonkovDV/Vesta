@@ -4,7 +4,9 @@
 
 | Version | Supported |
 | --- | --- |
-| 2.10.0 | best effort |
+| 4.3.x | best effort |
+| 3.0.0 to 4.2.0 | no: upgrade to 4.3.x (the default Streams bus ignores `REDIS_TLS`, MP-K49; 3.0.x also turns product domains on by default, MP-K38) |
+| 2.10.0 to 2.18.3 | no: upgrade to 4.3.x (the default bus loses events, MP-K22) |
 | 2.9.0 | no: upgrade (MP-K11, MP-K13, MP-K17) |
 
 ## Reporting a vulnerability

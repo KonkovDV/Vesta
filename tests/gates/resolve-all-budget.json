@@ -1,32 +1,7 @@
 {
-  "description": "Ceiling of token names that fail to resolve with USE_MOCK_AI=true. A failing token that is not in this list fails CI. A name that starts resolving may stay until the list is edited down. Measured 2026-10-24: 27 names.",
+  "description": "Ceiling of token names that fail to resolve with USE_MOCK_AI=true. A failing token that is not in this list fails CI. Measured on the 4.5.0 integration job (run 42263561228): 2 names in every mode. The 25 names that resolved are no longer listed.",
   "tokens": [
-    "IArticleSummarizer",
-    "ITrendAnalyzer",
     "IUnitOfWork",
-    "IAutoTrapGenerator",
-    "ILlmTrajectoryIntelligenceExtractor",
-    "LLMAdapterFactory",
-    "ISandboxPool",
-    "ResearchAssistanceUseCase",
-    "ILlmJudge",
-    "IReflectionLoop",
-    "IPromptClassifier",
-    "IStructuredReasoningProtocol",
-    "ISelfCorrectionAgent",
-    "IGoalEvaluator",
-    "IResponseEvaluator",
-    "IOutputGuardrailPipeline",
-    "IIterativeRefiner",
-    "ITaskPrioritizer",
-    "IEvolutionEngine",
-    "IFitnessEvaluator",
-    "IPromptChainExecutor",
-    "IDeepResearchService",
-    "IAgentDialogueLoop",
-    "ICostAwareModelSelector",
-    "IReviewerPanel",
-    "IResearchLabOrchestrator",
-    "IToolResultSummarizer"
+    "ISandboxPool"
   ]
 }

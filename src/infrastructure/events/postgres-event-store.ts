@@ -26,6 +26,7 @@ import {
 import { CorrelationIdProvider } from '../../core/correlation/correlation';
 import { isValidPostgresIdentifier, qualifyIdentifier } from '../database/postgres-identifiers';
 import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
+import { endPool } from '../database/end-pool';
 import { getConfig } from '../../config';
 import { tryJsonParse } from '../../core/utils/json';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
@@ -400,7 +401,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
 
   async close(): Promise<void> {
     this.pool.off('error', this.onPoolError);
-    await this.pool.end();
+    await endPool(this.pool);
   }
 
   async saveEvents(events: DomainEvent[], options?: SaveEventsOptions): Promise<SaveEventsResult> {
@@ -927,20 +928,26 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
    * a lower gsn and committed later (MP-K23). Needs migration 003. Canonical table only.
    */
   async getCommittedEventsAfter(cursor: CommitCursor | null, limit = 500): Promise<CommittedEventsPage> {
+    // Rows below the snapshot xmin come first in (tx_id, gsn) order; those are released.
+    // One row past the page shows whether a committed row waits behind an open transaction.
     const res = await this.pool.query(
-      `SELECT ${EVENT_READ_COLUMNS}, tx_id::text AS tx_id
+      `SELECT ${EVENT_READ_COLUMNS}, tx_id::text AS tx_id,
+              tx_id < pg_snapshot_xmin(pg_current_snapshot()) AS released
          FROM ${this.qualifiedEventsTable}
-        WHERE tx_id < pg_snapshot_xmin(pg_current_snapshot())
-          AND (tx_id, gsn) > ($1::xid8, $2::bigint)
+        WHERE (tx_id, gsn) > ($1::xid8, $2::bigint)
         ORDER BY tx_id, gsn
         LIMIT $3`,
-      [cursor?.txId ?? '0', cursor?.gsn ?? 0, limit],
+      [cursor?.txId ?? '0', cursor?.gsn ?? 0, limit + 1],
     );
-    const events = res.rows.map(rowToEvent);
-    const last = res.rows.at(-1) as { tx_id: string; gsn: string | number } | undefined;
+    const firstHeld = res.rows.findIndex((row) => row.released !== true);
+    const releasedRows = res.rows.slice(0, Math.min(limit, firstHeld === -1 ? res.rows.length : firstHeld));
+    const events = releasedRows.map(rowToEvent);
+    const last = releasedRows.at(-1) as { tx_id: string; gsn: string | number } | undefined;
+    const held = firstHeld === -1 ? undefined : (res.rows[firstHeld] as { timestamp: string });
     return {
       events,
       cursor: last ? { txId: String(last.tx_id), gsn: Number(last.gsn) } : cursor,
+      ...(held ? { heldSince: new Date(held.timestamp) } : {}),
     };
   }
 

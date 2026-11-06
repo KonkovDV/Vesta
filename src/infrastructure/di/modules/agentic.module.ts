@@ -52,13 +52,6 @@ import { McpToolConsumerAdapter } from '../../mcp/McpToolConsumerAdapter';
 import { A2ATaskRunnerAdapter } from '../../a2a/A2ATaskRunnerAdapter';
 import { A2AStreamTransportAdapter } from '../../a2a/A2AStreamTransportAdapter';
 import { SsrfDnsGuard } from '../../security/SsrfDnsGuard';
-import {
-  HttpA2AX402SettlementAdapter,
-  InMemoryA2AX402NonceStore,
-  InMemoryA2AX402PaymentRepository,
-  ProfiledA2AX402MerchantPolicy,
-} from '../../a2a/A2AX402PaymentAdapters';
-import { InMemoryA2AX402CommerceMeter } from '../../a2a/A2AX402CommerceMeter';
 import { AgentDialogueLoopAdapter } from '../../mas/AgentDialogueLoopAdapter';
 // Wave G
 import { CostAwareModelSelectorAdapter } from '../../routing/CostAwareModelSelectorAdapter';
@@ -74,10 +67,6 @@ import { UserFeedbackCollectorAdapter } from '../../feedback/UserFeedbackCollect
 import { VotingAggregatorAdapter } from '../../evaluation/VotingAggregatorAdapter';
 import { ConcurrencyLimiterAdapter } from '../../execution/ConcurrencyLimiterAdapter';
 import { ToolResultSummarizerAdapter } from '../../agents/ToolResultSummarizerAdapter';
-import {
-  RequireA2AX402PaymentService,
-  SubmitA2AX402PaymentService,
-} from '../../../application/services/a2a/A2AX402PaymentService';
 // Wave I
 import { PQCAuthorizationGuard } from '../../a2a/PQCAuthorizationGuard';
 import { FormalProverAdapter } from '../../evaluation/FormalProverAdapter';
@@ -86,6 +75,7 @@ import { ContextWindowGuardAdapter } from '../../agents/ContextWindowGuardAdapte
 import { ToolLoopDetectorAdapter } from '../../agents/ToolLoopDetectorAdapter';
 import { ToolResultTruncatorAdapter } from '../../agents/ToolResultTruncatorAdapter';
 import { ContextPrunerAdapter } from '../../agents/ContextPrunerAdapter';
+import { productDomainEnabled } from '../../../config/product-domains';
 
 const log = getBootstrapLogger('agentic');
 
@@ -270,13 +260,18 @@ export function registerAgenticChains(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  container.register(DI_TOKENS.IDeepResearchService, (c) => {
-    return new DeepResearchAdapter(
-      c.resolve(DI_TOKENS.LLMAdapterFactory),
-      c.resolve(DI_TOKENS.IResearchService),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-    );
-  }, { lifecycle: 'singleton' });
+  // Deep research searches through IResearchService, which the research domain registers
+  // (ADR-0005). Without it the token was registered and every resolve failed.
+  const deepResearch = productDomainEnabled('research');
+  if (deepResearch) {
+    container.register(DI_TOKENS.IDeepResearchService, (c) => {
+      return new DeepResearchAdapter(
+        c.resolve(DI_TOKENS.LLMAdapterFactory),
+        c.resolve(DI_TOKENS.IResearchService),
+        c.resolve(DI_TOKENS.IStructuredLogger),
+      );
+    }, { lifecycle: 'singleton' });
+  }
 
   container.register(DI_TOKENS.ICitationExtractor, (c) => {
     return new CitationExtractorAdapter(
@@ -284,14 +279,14 @@ export function registerAgenticChains(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  log.info('Agentic Chains (Wave E) -> 3 services registered');
+  log.info('Agentic Chains (Wave E) services registered', { deepResearch });
 }
 
 // -----------------------------------------------------------------------------
 // Wave F -> Inter-Agent Communication (Phase 6)
 // -----------------------------------------------------------------------------
 
-export function registerAgenticInterAgent(): void {
+export async function registerAgenticInterAgent(): Promise<void> {
   if (container.isRegistered(DI_TOKENS.IMcpToolConsumer)) {
     return;
   }
@@ -334,51 +329,10 @@ export function registerAgenticInterAgent(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  container.register(DI_TOKENS.IA2AX402MerchantPolicy, () => {
-    return new ProfiledA2AX402MerchantPolicy();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402PaymentRepository, () => {
-    return new InMemoryA2AX402PaymentRepository();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402NonceStore, () => {
-    return new InMemoryA2AX402NonceStore();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402SettlementPort, (c) => {
-    return new HttpA2AX402SettlementAdapter(
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IConfigLoader),
-      c.resolve(DI_TOKENS.ISsrfDnsGuard),
-    );
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402CommerceMeter, () => {
-    return new InMemoryA2AX402CommerceMeter();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.RequireA2AX402PaymentService, (c) => {
-    return new RequireA2AX402PaymentService(
-      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
-      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
-      c.resolve(DI_TOKENS.IEventStore),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
-    );
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.SubmitA2AX402PaymentService, (c) => {
-    return new SubmitA2AX402PaymentService(
-      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
-      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
-      c.resolve(DI_TOKENS.IA2AX402NonceStore),
-      c.resolve(DI_TOKENS.IA2AX402SettlementPort),
-      c.resolve(DI_TOKENS.IEventStore),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
-    );
-  }, { lifecycle: 'singleton' });
+  if (productDomainEnabled('x402')) {
+    const { registerA2AX402Services } = await import('./x402.module');
+    registerA2AX402Services();
+  }
 
   container.register(DI_TOKENS.IAgentDialogueLoop, (c) => {
     return new AgentDialogueLoopAdapter(
@@ -387,7 +341,7 @@ export function registerAgenticInterAgent(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  log.info('Agentic Inter-Agent (Wave F) -> 11 services registered');
+  log.info('Agentic Inter-Agent (Wave F) services registered', { x402: productDomainEnabled('x402') });
 }
 
 // -----------------------------------------------------------------------------

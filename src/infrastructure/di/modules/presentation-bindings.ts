@@ -8,6 +8,7 @@ import { DI_TOKENS } from '../../../core/di/DI_TOKENS';
 import { ApplicationServiceTokens } from '../../../application/di/bootstrap';
 import type { HttpRouteRegistrar } from '../../../application/app';
 import { registerDefaultHttpRoutes } from '../../../presentation/http/register-default-routes';
+import { productDomainEnabled } from '../../../config/product-domains';
 
 function createFallbackLogger(): ILogger {
   return {
@@ -28,6 +29,13 @@ export function registerPresentationBindings(container: DIContainer): void {
     );
   }
 
+  // Product controllers bind only for the domains a deployment turns on (ADR-0005).
+  if (productDomainEnabled('sales')) registerSalesControllers(container);
+  if (productDomainEnabled('hr')) registerHrControllers(container);
+  if (productDomainEnabled('healthcare')) registerHealthcareControllers(container);
+}
+
+function registerSalesControllers(container: DIContainer): void {
   if (!container.isRegistered('LeadScoringController')) {
     container.register(
       'LeadScoringController',
@@ -55,7 +63,9 @@ export function registerPresentationBindings(container: DIContainer): void {
       { lifecycle: 'singleton', tags: ['controller', 'http', 'sales'] },
     );
   }
+}
 
+function registerHrControllers(container: DIContainer): void {
   if (!container.isRegistered('TalentAcquisitionController')) {
     container.register(
       'TalentAcquisitionController',
@@ -83,7 +93,9 @@ export function registerPresentationBindings(container: DIContainer): void {
       { lifecycle: 'singleton', tags: ['controller', 'http', 'hr'] },
     );
   }
+}
 
+function registerHealthcareControllers(container: DIContainer): void {
   if (!container.isRegistered('DiagnosisSupportController')) {
     container.register(
       'DiagnosisSupportController',

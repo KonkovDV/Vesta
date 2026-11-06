@@ -9,6 +9,16 @@ import { applyKernelExtensions } from '../../src/kernel';
 const logger = { log() {}, info() {}, warn() {}, error() {}, debug() {} };
 const policy = (list?: string[]) => new ToolPolicyService(logger as never, new ToolPolicyResolverImpl(), list);
 
+test('a longer agent name does not inherit the registered role profile', async () => {
+  const service = policy();
+  assert.equal((await service.evaluate({ toolName: 'read_file', agentId: 'researcher', arguments: {} })).allowed, true);
+  assert.equal((await service.evaluate({ toolName: 'read_file', agentId: 'researcher-x', arguments: {} })).allowed, false);
+  assert.equal((await service.evaluate({ toolName: 'read_file', agentId: 'researcher.x', arguments: {} })).allowed, false);
+  assert.equal((await service.evaluate({ toolName: 'read_file', agentId: 'architect', arguments: {} })).allowed, true);
+  assert.equal((await service.evaluate({ toolName: 'read_file', agentId: 'architect-1', arguments: {} })).allowed, false);
+  assert.equal((await service.evaluate({ toolName: 'session_status', agentId: 'researcher-x', arguments: {} })).allowed, true);
+});
+
 test('the contained shell tools are allowed for agent-run and need approval; reads do not', async () => {
   const service = policy();
   for (const tool of ['bash', 'python']) {

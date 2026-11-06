@@ -90,7 +90,7 @@ export class BootstrapOrchestrator {
 
     // Record metrics for each check
     for (const check of result.checks) {
-      const status = check.passed ? 'passed' : 'failed';
+      const status = check.deferred ? 'deferred' : check.passed ? 'passed' : 'failed';
       bootstrapChecksTotal.inc({ check_name: check.name, status });
       bootstrapChecksDuration.observe(
         { check_name: check.name },
@@ -150,11 +150,12 @@ export class BootstrapOrchestrator {
     lines.push(`║  Duration: ${result.durationMs.toFixed(2).padEnd(47)}ms ║`);
     lines.push(`║  Checks:   ${result.checks.length.toString().padEnd(47)}   ║`);
     lines.push(`║  Passed:   ${result.checks.filter(c => c.passed).length.toString().padEnd(47)}   ║`);
-    lines.push(`║  Failed:   ${result.checks.filter(c => !c.passed).length.toString().padEnd(47)}   ║`);
+    lines.push(`║  Deferred: ${result.checks.filter(c => c.deferred).length.toString().padEnd(47)}   ║`);
+    lines.push(`║  Failed:   ${result.checks.filter(c => !c.passed && !c.deferred).length.toString().padEnd(47)}   ║`);
     lines.push('╠══════════════════════════════════════════════════════════╣');
 
     for (const check of result.checks) {
-      const status = check.passed ? '✓' : check.severity === 'critical' ? '✗' : '⚠';
+      const status = check.deferred ? '…' : check.passed ? '✓' : check.severity === 'critical' ? '✗' : '⚠';
       const duration = `${check.durationMs.toFixed(1)}ms`.padStart(8);
       const name = check.name.padEnd(20);
       lines.push(`║  ${status} ${name} ${duration}  ${check.severity.padEnd(10)} ║`);

@@ -35,6 +35,7 @@ import { registerApplicationServices } from './modules/application.module';
 import { registerHttpModule } from './modules/http.module';
 import { registerPlatformModule } from './modules/platform.module';
 import { initializeHealthcareWorkers, registerHealthcareModule } from './modules/healthcare.module';
+import { productDomainEnabled } from '../../config/product-domains';
 import { registerSecurityModule, registerSsrfDnsGuard } from './modules/security.module';
 import { registerUserApprovalModule } from './modules/user-approval.module';
 import { registerScientificSkillsServices } from './modules/scientific-skills.module';
@@ -150,7 +151,7 @@ export async function bootstrap(config: BootstrapConfig = {}): Promise<typeof co
 
   try {
     registerModuleAIServices();
-    registerModuleResearchServices();
+    if (productDomainEnabled('research')) registerModuleResearchServices();
     registerCoreInfraDatabaseServices();
     registerCoreInfraCacheServices();
     registerCoreInfraMetricsServices();
@@ -215,7 +216,7 @@ export async function bootstrap(config: BootstrapConfig = {}): Promise<typeof co
     registerSmmuModule();
     registerModuleChatRuntime();
     registerRepositoryServices(Boolean(config.useInMemoryRepositories));
-    registerHealthcareModule();
+    if (productDomainEnabled('healthcare')) registerHealthcareModule();
     registerScientificSkillsServices();
     registerSkillsServices();
     registerSkillRelationGraphModule();
@@ -241,7 +242,7 @@ export async function bootstrap(config: BootstrapConfig = {}): Promise<typeof co
     registerAgenticEvaluation();
     registerAgenticPlanning();
     registerAgenticChains();
-    registerAgenticInterAgent();
+    await registerAgenticInterAgent();
     registerAgenticAdvanced();
     registerAgenticCrossCutting();
     registerSota2026MultiAgentModule();
@@ -288,8 +289,8 @@ export async function bootstrap(config: BootstrapConfig = {}): Promise<typeof co
     // Initialize semantic embedding worker (background vectorization)
     await initializeSemanticEmbeddingWorker();
 
-    // Initialize healthcare workers (ingestion + async delivery)
-    await initializeHealthcareWorkers();
+    // Healthcare workers (ingestion + async delivery) only run with the domain on (ADR-0005).
+    if (productDomainEnabled('healthcare')) await initializeHealthcareWorkers();
 
     // Initialize Plugins
     try {

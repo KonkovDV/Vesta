@@ -111,7 +111,8 @@ export class ToolPolicyService implements IToolExecutionPolicy {
     // 2. Role-Based Access Control (RBAC)
     // Map agent roles to Tool Profiles
     // An agent id without a registered role gets 'minimal' (session_status only).
-    // The id is a label set by server code; callers must not let a client choose it.
+    // Only the exact role name selects a wider profile. A longer name such as
+    // researcher-x stays minimal, so the label cannot widen the profile.
     const profile = this.getProfileForAgent(agentId);
 
     const policy = this.policyResolver.resolveToolProfilePolicy(profile);
@@ -145,8 +146,7 @@ export class ToolPolicyService implements IToolExecutionPolicy {
   }
 
   /**
-   * Resolve agent role to tool profile using an explicit role registry.
-   * Uses exact prefix matching to prevent agent-name spoofing (SEC-10).
+   * An exact registered role selects its profile. A prefix does not.
    */
   private static readonly AGENT_ROLE_REGISTRY: ReadonlyMap<string, ToolProfileId> = new Map([
     ['architect', 'coding'],
@@ -162,12 +162,7 @@ export class ToolPolicyService implements IToolExecutionPolicy {
 
   private getProfileForAgent(agentId: string): ToolProfileId | undefined {
     const normalizedId = agentId.trim().toLowerCase();
-    for (const [role, profile] of ToolPolicyService.AGENT_ROLE_REGISTRY) {
-      if (normalizedId === role || normalizedId.startsWith(`${role}-`) || normalizedId.startsWith(`${role}.`)) {
-        return profile;
-      }
-    }
-    return 'minimal';
+    return ToolPolicyService.AGENT_ROLE_REGISTRY.get(normalizedId) ?? 'minimal';
   }
 }
 

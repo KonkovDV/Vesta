@@ -59,6 +59,7 @@ export function loadConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AppConf
       APP_BOOTSTRAP_FORCE: env.APP_BOOTSTRAP_FORCE,
       ENABLE_HTTP: env.ENABLE_HTTP,
       HTTP_LOG_START: env.HTTP_LOG_START,
+      TRUST_PROXY: env.TRUST_PROXY,
       DATABASE_URL: env.DATABASE_URL,
       DB_HOST: env.DB_HOST,
       DB_PORT: env.DB_PORT,

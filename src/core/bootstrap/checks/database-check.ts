@@ -38,8 +38,7 @@ export class DatabaseCheck extends BaseIntegrityCheck {
         }
         // In Phase 0 (Pre-Bootstrap), DI is not ready yet. 
         // We validate that config is present, but skip connectivity check.
-        return this.pass('Database config present (connectivity check deferred until DI bootstrap)', {
-            status: 'deferred',
+        return this.defer('Database config present (connectivity check deferred until DI bootstrap)', {
             reason: 'DI container not yet populated',
         });
       }

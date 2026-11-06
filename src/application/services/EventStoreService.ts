@@ -47,6 +47,11 @@ export class EventStoreService {
     return this.eventStore.getLatestGsn();
   }
 
+  /**
+   * @deprecated For diagnostics only. A consumer that keeps "last gsn" skips an event
+   * whose transaction drew a lower gsn and committed later (MP-K23). Follow the journal
+   * with `getCommittedEventsAfter` of the event store and a stored `CommitCursor`.
+   */
   async getEventsByGsnRange(fromExclusiveGsn: number | null, limit: number): Promise<DomainEvent[]> {
     return this.eventStore.getEventsByGsnRange(fromExclusiveGsn, limit);
   }

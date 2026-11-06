@@ -6,6 +6,7 @@ import { createSalesRoutes } from './routes/sales.routes';
 import { createHrRoutes } from './routes/hr.routes';
 import { createHealthcareRoutes, HEALTHCARE_REVIEW_SCOPE } from './routes/healthcare.routes';
 import { createIngestionRoutes } from './routes/ingestion.routes';
+import { productDomainEnabled } from '../../config/product-domains';
 
 /**
  * Scope each product mount requires after authentication. A key without it gets 403
@@ -28,8 +29,15 @@ export const registerDefaultHttpRoutes: HttpRouteRegistrar = (
   // Identity Routes — IP-based rate limiting only (no auth required for register/login)
   // NOTE: rateLimiterMiddleware (IP-based) is already applied globally via app.use('/api', ...).
   app.use('/api/v1/identity', createIdentityRoutes(authMw));
-  app.use('/api/v1/sales', authMw, rateLimitMw, requireScope(PRODUCT_ROUTE_SCOPES.sales), createSalesRoutes());
-  app.use('/api/v1/hr', authMw, rateLimitMw, requireScope(PRODUCT_ROUTE_SCOPES.hr), createHrRoutes());
-  app.use('/api/v1/healthcare', authMw, rateLimitMw, requireScope(PRODUCT_ROUTE_SCOPES.healthcare), createHealthcareRoutes());
+  // Product domains mount only when the deployment turns them on (ADR-0005).
+  if (productDomainEnabled('sales')) {
+    app.use('/api/v1/sales', authMw, rateLimitMw, requireScope(PRODUCT_ROUTE_SCOPES.sales), createSalesRoutes());
+  }
+  if (productDomainEnabled('hr')) {
+    app.use('/api/v1/hr', authMw, rateLimitMw, requireScope(PRODUCT_ROUTE_SCOPES.hr), createHrRoutes());
+  }
+  if (productDomainEnabled('healthcare')) {
+    app.use('/api/v1/healthcare', authMw, rateLimitMw, requireScope(PRODUCT_ROUTE_SCOPES.healthcare), createHealthcareRoutes());
+  }
   app.use('/api/v1/memory/ingest', authMw, rateLimitMw, requireScope(PRODUCT_ROUTE_SCOPES.ingest), createIngestionRoutes());
 };

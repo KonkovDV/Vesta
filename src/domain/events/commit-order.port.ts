@@ -18,6 +18,13 @@ export interface CommittedEventsPage {
   events: Array<DomainEvent & { gsn?: number }>;
   /** Cursor after the last returned event, or the cursor passed in when there were none. */
   cursor: CommitCursor | null;
+  /**
+   * Timestamp of the oldest committed event after the returned ones that the reader
+   * could not release yet, because a transaction that may still commit before it is
+   * open. Absent when nothing is held back. A long open transaction anywhere in the
+   * cluster shows up here first.
+   */
+  heldSince?: Date;
 }
 
 export interface ICommitOrderReader {

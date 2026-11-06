@@ -21,7 +21,7 @@ import type { IOutbox } from '../../domain/events/outbox.interface';
 import type { IEventStore } from '../../domain/events/event-store.interface';
 import { DomainEvent as StoreEvent } from '../../domain/events/event-store.interface';
 import type { ResearchDomainEvent } from '../../domain/research/events';
-import { PostgreSQLOutbox } from '../events/postgres-outbox';
+import { PostgreSQLOutbox, lockAggregateForWrite } from '../events/postgres-outbox';
 import { requireActivePgClient } from './PostgresAdapter';
 import type { PoolClient } from 'pg';
 
@@ -98,17 +98,8 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
         };
       }
 
-      // Восстанавливаем агрегат из данных
-      const report = this.hydrateFromDb(result.rows[0] as {
-        id: string;
-        topic: string;
-        status: string;
-        created_by: string;
-        created_at: string;
-        completed_at?: string;
-        version?: number;
-      });
-      return { success: true, data: report };
+      // The read model holds no articles, summaries, or trends; the journal does (MP-K44).
+      return this.rehydrate(id);
 
     } catch (error) {
       return {
@@ -159,23 +150,27 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
       const sortOrder = options.sortOrder?.toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
       query += ` ORDER BY ${sortBy} ${sortOrder}`;
 
-      // Пагинация
-      const limit = options.limit || 10;
-      const offset = options.offset || 0;
+      // Пагинация. Each row costs a journal read (MP-K44), so one page has at most MAX_PAGE rows.
+      const limit = Math.min(Math.max(1, Math.trunc(options.limit || 10)), PostgresResearchReportRepository.MAX_PAGE);
+      const offset = Math.max(0, Math.trunc(options.offset || 0));
       query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
       params.push(limit, offset);
 
       const result = await this.db.query(query, params);
 
-      const reports = result.rows.map(row => this.hydrateFromDb(row as {
-        id: string;
-        topic: string;
-        status: string;
-        created_by: string;
-        created_at: string;
-        completed_at?: string;
-        version?: number;
-      }));
+      // Each row names a report; the journal rebuilds it (MP-K44), a few at a time so one
+      // page does not take every pool connection.
+      const ids = result.rows.map((row) => ResearchReportId.fromString((row as { id: string }).id));
+      const rebuilt: RepositoryResult<ResearchReport>[] = [];
+      for (let start = 0; start < ids.length; start += PostgresResearchReportRepository.REHYDRATE_CONCURRENCY) {
+        const chunk = ids.slice(start, start + PostgresResearchReportRepository.REHYDRATE_CONCURRENCY);
+        rebuilt.push(...await Promise.all(chunk.map((id) => this.rehydrate(id))));
+      }
+      const failed = rebuilt.find((item) => !item.success);
+      if (failed && !failed.success) {
+        return { success: false, error: failed.error };
+      }
+      const reports = rebuilt.flatMap((item) => (item.success ? [item.data] : []));
       const total = await this.getTotalCount(options);
 
       return {
@@ -198,6 +193,8 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
   }
 
   private static readonly SNAPSHOT_FREQUENCY = 100;
+  private static readonly MAX_PAGE = 100;
+  private static readonly REHYDRATE_CONCURRENCY = 4;
 
   async save(report: ResearchReport): Promise<RepositoryResult<ResearchReport>> {
     try {
@@ -218,6 +215,11 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
         const client: PoolClient = requireActivePgClient(
           'PostgresResearchReportRepository.save',
         );
+
+        // Writers of one report queue here until the first commits (MP-K40).
+        // Without the lock two saves read the same version, both passed the check,
+        // and the outbox numbered the second batch after the first.
+        await lockAggregateForWrite(client, report.id.toValue());
 
         // Проверяем версию для optimistic locking в рамках того же клиента.
         const versionResult = await client.query<{ version: number }>(
@@ -387,30 +389,6 @@ export class PostgresResearchReportRepository implements IResearchReportReposito
   }
 
   // Приватные методы для маппинга данных
-  private hydrateFromDb(dbRow: {
-    id: string;
-    topic: string;
-    status: string;
-    created_by: string;
-    created_at: string;
-    completed_at?: string;
-    version?: number;
-  }): ResearchReport {
-    // Восстановление агрегата из упрощенной read‑model записи
-    // Для полного восстановления состояния нужно использовать rehydrate с событиями
-    const createdAt = new Date(dbRow.created_at);
-    const completedAt = dbRow.completed_at ? new Date(dbRow.completed_at) : undefined;
-
-    // Props not used - restoreFromHistory handles reconstitution
-    // This read-model hydrate is simplified; full reconstitution uses event replay
-
-    // Для полного восстановления состояния используйте rehydrate с событиями
-    return ResearchReport.restoreFromHistory(
-      ResearchReportId.fromString(dbRow.id),
-      [] // Пустой массив событий - read-model не содержит полного состояния
-    );
-  }
-
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private dehydrateToDb(report: any): {
     id: string;

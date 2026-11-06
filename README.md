@@ -20,7 +20,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 | Field | Value |
 | --- | --- |
-| Version | 2.15.0 (`package.json`) |
+| Version | 4.8.0 (`package.json`) |
 | Runtime | Node.js 24 |
 | Maturity | Self-assessed TRL 4 in the sense of ISO 16290: a component exercised in the laboratory. Not a certificate and not a deployed service. |
 | Status words | `pinned` — a product names a 40-character commit. `ready` — `/health/ready` is 200 with the three real-store flags. Neither word means a model is accurate or a filing was sent. |
@@ -29,7 +29,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 ## What is claimed
 
-The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs typecheck, `npm test` on Node 24 and 26, the build, the production audit, and an integration job with pgvector and Redis. That job also resolves every DI token against a fixed ceiling and requests every route without a key. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
+The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs typecheck, `npm test` on Node 24 and 26, the build, the production audit, and an integration job with pgvector on Redis 7 and Redis 8.10. That job resolves every DI token against a fixed ceiling and requests every route without a key, once with the product domains off and once with every `MODULE_*_ENABLED` flag on. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
 
 ## What is not claimed
 
@@ -39,8 +39,9 @@ A web client, a collections product, a measured model score, exactly-once delive
 
 - Starts one process: `src/index.ts` calls `runKernel()`.
 - Restores state from an append-only event journal.
-- Publishes through an outbox. The default bus is Redis Pub/Sub: a publish with no subscriber is lost. `EVENT_BUS_TRANSPORT=streams` keeps the entry until a consumer acknowledges it. MP-K22.
+- Publishes through an outbox. The default bus is Redis Streams: an entry stays until a consumer group acknowledges it, and a consumer that starts later still reads it. On Redis 8.2 and later, trimming with `ACKED` does not remove an entry a group has not acknowledged, until the kernel's hard cap (`EVENT_BUS_STREAM_HARD_MAXLEN`). On Redis 8.6 and later, a repeated publish of one event id returns the first entry only while Redis still remembers that id (default: the last 100 ids, for 100 seconds). Outside that window a second entry is appended, and `processed_events` is what stops a finished handler from running again. Each event reaches one process of a consumer group; an entry that fails `EVENT_BUS_STREAM_MAX_DELIVERIES` times goes to a dead-letter stream. `EVENT_BUS_TRANSPORT=pubsub` restores Pub/Sub, where a publish with no subscriber is lost. ADR-0004.
 - Lets a project add services, HTTP routes, and SQL migrations without editing the kernel.
+- Registers no product domain (sales, HR, healthcare, research, x402) unless the deployment sets `MODULE_<NAME>_ENABLED=true`. ADR-0005.
 - Refuses to replace a service the kernel already registered.
 - Stops a tool body in `ToolRegistry` when the call requires approval and does not carry `approvalGranted`.
 - Connects selected outbound HTTP calls to the addresses the SSRF guard just checked. A client a project adds does not inherit that guard.
@@ -130,7 +131,7 @@ The only supported import is `microphoenix`. `microphoenix/dist/...` is rejected
 | `npm run migrate` | Apply kernel migrations. Extra directories: `npm run migrate -- --dir ./migrations` |
 | `npm start` | `node dist/index.js` |
 
-The kernel baseline is `001_consolidated.sql`. `002_runtime_tables.sql` follows it. The second run skips a file when its checksum matches. A project directory passed with `--dir` still runs after these files. A database that already applied an older copy of `001_consolidated.sql` cannot take a new checksum of that same filename.
+The kernel baseline is `001_consolidated.sql`. `002_runtime_tables.sql` and `003_skill_graph_finops.sql` follow it. The second run skips a file when its checksum matches. A project directory passed with `--dir` still runs after these files. A database that already applied an older copy of `001_consolidated.sql` cannot take a new checksum of that same filename.
 
 ## Outbound HTTP
 
@@ -163,6 +164,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), and [RELEASE
 | [docs/adr/0001-kernel-as-package.md](docs/adr/0001-kernel-as-package.md) | Why the kernel is a package, not a fork |
 | [docs/adr/0002-long-running-case.md](docs/adr/0002-long-running-case.md) | A months-long case is not an agent episode |
 | [docs/adr/0003-product-placement.md](docs/adr/0003-product-placement.md) | Which rules stay in the kernel |
+| [docs/adr/0004-durable-event-bus-by-default.md](docs/adr/0004-durable-event-bus-by-default.md) | Why the default bus is Redis Streams |
+| [docs/adr/0005-product-domains-off-by-default.md](docs/adr/0005-product-domains-off-by-default.md) | Product domains in this tree are off unless a deployment turns them on |
 
 ## License
 

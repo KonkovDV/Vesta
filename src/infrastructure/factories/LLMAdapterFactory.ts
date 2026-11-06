@@ -28,6 +28,7 @@ import {
 import { getConfig } from '../../config';
 import { safeParseInt } from '../../core/config/safe-parse';
 import type { IStructuredLogger } from '../../core/logging/IStructuredLogger';
+import { MockLLMAdapter } from './MockLLMAdapter';
 
 /**
  * Типы поддерживаемых провайдеров
@@ -329,6 +330,9 @@ export class LLMAdapterFactory {
    */
   private createLocalAdapter(config?: LLMProviderConfig): ILLMAdapter {
     const providerConfig = (config?.config || {});
+    if (providerConfig['mock'] === true) {
+      return new MockLLMAdapter();
+    }
     const modelPath = (
       (providerConfig['modelPath'] as string | undefined) ||
       (providerConfig['binaryPath'] as string | undefined)
@@ -504,8 +508,16 @@ class UnavailableLLMAdapter extends BaseLLMAdapter {
  * Фабричная функция для создания фабрики из конфигурации приложения
  */
 export function createLLMAdapterFactoryFromEnv(): LLMAdapterFactory {
-  const providers: LLMProviderConfig[] = [];
   const config = getConfig();
+  if (config.USE_MOCK_AI === 'true') {
+    return LLMAdapterFactory.create({
+      providers: [{ type: 'local', config: { mock: true }, priority: 1 }],
+      defaultProvider: 'local',
+      enableFailover: false,
+    });
+  }
+
+  const providers: LLMProviderConfig[] = [];
 
   const openaiApiKey = config.OPENAI_API_KEY;
 

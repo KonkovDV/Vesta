@@ -44,3 +44,23 @@ test('a new unresolved token fails the resolve gate', () => {
     { token: 'INewBrokenToken' },
   ], budget), ['INewBrokenToken']);
 });
+
+test('a budgeted token whose dependency is not registered still fails the resolve gate', () => {
+  assert.deepEqual(gates.unexpectedResolveFailures([
+    { token: 'LLMAdapterFactory', message: 'No LLM providers configured.' },
+    { token: 'IUnitOfWork', message: 'Service not registered: IResearchService' },
+  ], ['LLMAdapterFactory', 'IUnitOfWork']), ['IUnitOfWork']);
+});
+
+test('the DI literal gate counts resolve calls with a string token, also across a line break', () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const { countStringResolves } = require('../../scripts/ci-gates-lib.cjs') as { countStringResolves(source: string): number };
+  const source = [
+    "container.resolve('IEventStore');",
+    'container.resolve<IOutbox>("IOutbox");',
+    'c.resolve(\n  \'ILogger\');',
+    'container.resolve(DI_TOKENS.IEventBus);',
+    'container.inject(KernelTokens.IEventStore);',
+  ].join('\n');
+  assert.equal(countStringResolves(source), 3);
+});

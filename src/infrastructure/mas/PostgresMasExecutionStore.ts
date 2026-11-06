@@ -20,6 +20,7 @@ import {
   qualifyIdentifier,
 } from '../database/postgres-identifiers';
 import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
+import { endPool } from '../database/end-pool';
 import {
   castToMasTaskStatus,
   castToMasExecutionStatus,
@@ -361,7 +362,7 @@ export class PostgresMasExecutionStore implements MasExecutionStore {
   }
 
   async close(): Promise<void> {
-    await this.pool.end();
+    await endPool(this.pool);
   }
 
   // ---------------------------------------------------------------------------

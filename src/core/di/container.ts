@@ -20,6 +20,7 @@
 import { Timestamp, now } from '../types';
 import type { AspectManager, ApplyAspectsOptions } from '../aop/AspectManager';
 import type { ContainerDisposalEvent, DisposalResult, IDisposable, IContainer, IAmbientScopeProvider } from './types';
+import type { InjectionToken } from './injection-token';
 
 /** Counter for generating unique container IDs */
 let containerIdCounter = 0;
@@ -37,7 +38,7 @@ export type ServiceToken = string | symbol;
  * Type-safe injection token for DI container.
  * Provides compile-time type checking for resolved services.
  */
-export type InjectionToken<T> = symbol & { __type?: T };
+export type { InjectionToken } from './injection-token';
 
 /**
  * Опции регистрации сервиса
@@ -230,6 +231,23 @@ export class DIContainer implements IContainer {
    * const aiClient = container.resolve<IAIClient>('IAIClient');
    * ```
    */
+  /**
+   * Typed registration (T2.3): the factory must return what the token names.
+   * Same entry as register() with that string.
+   */
+  provide<T>(
+    token: InjectionToken<T>,
+    factory: (c: DIContainer) => T,
+    optionsOrLifecycle?: ServiceRegistrationOptions | 'singleton' | 'transient' | 'scoped',
+  ): void {
+    this.register<T>(token, factory, optionsOrLifecycle);
+  }
+
+  /** Typed resolution (T2.3): the token decides the type, so no type argument or cast. */
+  inject<T>(token: InjectionToken<T>, scopeId?: string): T {
+    return this.resolve<T>(token, scopeId);
+  }
+
   resolve<T = unknown>(token: ServiceToken, scopeId?: string): T {
     if (!this.services.has(token)) {
       throw DIError.notRegistered(token);

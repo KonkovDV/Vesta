@@ -6,11 +6,15 @@ authors:
   - family-names: Konkov
     given-names: DV
 license: MIT
-version: 2.9.0
-date-released: "2026-10-23"
+version: 4.8.0
+date-released: "2026-11-06"
 repository-code: https://github.com/KonkovDV/Vesta
 abstract: >
-  Event-sourced server kernel published as Vesta. A product pins one commit.
-  Delivery to another system is at least once. A tool body that requires
+  Event-sourced server kernel published as Vesta, package version 4.8.0.
+  A product pins one commit. Since 3.0.0 the default bus is Redis Streams;
+  Pub/Sub is selected only with EVENT_BUS_TRANSPORT=pubsub. Since 4.0.0 the
+  sales, HR, healthcare, research, and x402 domains stay off unless
+  MODULE_<NAME>_ENABLED is true. Delivery to another system is at least once,
+  with the limits in docs/claims.md claim C5. A tool body that requires
   approval does not run until that call carries an approval grant. Cite the
   pinned commit and docs/claims.md. This file is not a measurement of model quality.

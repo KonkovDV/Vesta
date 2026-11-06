@@ -22,6 +22,7 @@ import { InMemoryTokenomicsController } from '../../finops/InMemoryTokenomicsCon
 import { DurableTokenomicsDecorator, type ISpendStateStore } from '../../finops/DurableTokenomicsDecorator';
 import { PostgresSpendStateStore } from '../../finops/PostgresSpendStateStore';
 import { getBootstrapLogger } from '../../../core/logging/bootstrap-logger';
+import { productDomainEnabled } from '../../../config/product-domains';
 
 const log = getBootstrapLogger('repositories');
 
@@ -49,7 +50,7 @@ export function registerRepositoryServices(useInMemory = false): void {
       description: useInMemory ? 'In-memory Conversation repository' : 'PostgreSQL Conversation repository',
     });
 
-    container.register('IResearchReportRepository', () => {
+    if (productDomainEnabled('research')) container.register('IResearchReportRepository', () => {
       if (useInMemory) {
         return {
           findById: async () => null,

@@ -122,6 +122,10 @@ export interface IEventStore {
    * Если fromExclusiveGsn === null — чтение начинается с минимального доступного GSN.
    * В противном случае возвращаются события с gsn > fromExclusiveGsn.
    *
+   * Только для диагностики: потребитель с курсором «последний gsn» пропускает событие,
+   * чья транзакция взяла меньший gsn и закоммитилась позже (MP-K23). Для чтения журнала
+   * потребителем — `getCommittedEventsAfter` из `commit-order.port.ts`.
+   *
    * @param fromExclusiveGsn - Последний уже обработанный GSN (исключительно) или null для чтения с начала истории
    * @param limit - Максимальное количество событий для выборки (должно быть > 0)
    * @returns Promise<DomainEvent[]> - События, отсортированные по GSN (ASC)
