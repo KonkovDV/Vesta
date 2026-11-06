@@ -7,7 +7,7 @@ import { requirePublicTables, runtimeDdlEnabled } from '../../src/infrastructure
 import { PostgresSkillRelationGraphAdapter } from '../../src/infrastructure/agents/PostgresSkillRelationGraphAdapter';
 import { PostgresFeatureFlagsStore } from '../../src/infrastructure/feature-flags/PostgresFeatureFlagsStore';
 import { PostgresSpendStateStore } from '../../src/infrastructure/finops/PostgresSpendStateStore';
-import { MasReadModelsRepository } from '../../src/infrastructure/mas/MasEventsRedisStreamsProjector';
+import { MasReadModelsRepository } from '../../src/infrastructure/mas/mas-read-models';
 
 /** A database without any table. Every statement is recorded and answers no rows. */
 function emptyDatabase(): { db: IDatabaseConnection; sent: string[] } {

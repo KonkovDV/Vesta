@@ -53,14 +53,6 @@ export const LegacyConfigSchema = z
     EVENT_STORE_LOGS: z.string().optional(),
     EVENT_PERSISTENCE_MODE: z.string().optional(),
 
-    // MAS Redis Streams pilot (R2.3)
-    MAS_REDIS_STREAMS_PILOT_ENABLED: z.string().optional(),
-    MAS_REDIS_STREAMS_PRODUCER_ENABLED: z.string().optional(),
-    MAS_REDIS_STREAMS_PROJECTORS_ENABLED: z.string().optional(),
-    MAS_REDIS_STREAMS_MAXLEN: z.string().optional(),
-    MAS_REDIS_STREAMS_DEDUP_TTL_SECONDS: z.string().optional(),
-    MAS_TASK_STATS_WINDOW_MINUTES: z.string().optional(),
-
     // Redis (generic + event bus)
     REDIS_HOST: z.string().optional(),
     REDIS_PORT: z.coerce.number().optional(),

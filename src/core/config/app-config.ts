@@ -130,31 +130,6 @@ export function getMetricsConfig(): MetricsConfig {
 }
 
 /**
- * R2.3 MAS Redis Streams pilot:
- * feature-flag accessors used by infra/DI to toggle Redis Streams producer and projectors.
- *
- * When disabled (default), MAS Redis Streams producer/projectors must remain inactive and
- * the canonical Event Store read-path must stay unchanged.
- */
-export function isMasRedisStreamsPilotEnabled(): boolean {
-  return readBool('MAS_REDIS_STREAMS_PILOT_ENABLED', false);
-}
-
-export function isMasRedisStreamsProducerEnabled(): boolean {
-  return readBoolMulti(
-    ['MAS_REDIS_STREAMS_PRODUCER_ENABLED', 'MAS_REDIS_STREAMS_PILOT_ENABLED'],
-    false,
-  );
-}
-
-export function isMasRedisStreamsProjectorsEnabled(): boolean {
-  return readBoolMulti(
-    ['MAS_REDIS_STREAMS_PROJECTORS_ENABLED', 'MAS_REDIS_STREAMS_PILOT_ENABLED'],
-    false,
-  );
-}
-
-/**
  * Hybrid retrieval (BM25 + vector) stays opt-in for production.
  *
  * The current BM25 implementation is intentionally @sota-stub and in-memory,
