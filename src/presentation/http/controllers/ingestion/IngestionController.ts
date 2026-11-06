@@ -11,6 +11,7 @@
  */
 
 import type { Request, Response } from 'express-serve-static-core';
+import { DomainError } from '../../../../domain/errors/DomainError';
 import type { 
   IContentIngestionService,
   IngestContentResult,
@@ -75,6 +76,15 @@ export class IngestionController {
     return req.body?.confirmed === true;
   }
 
+  private fail(res: Response, error: unknown): void {
+    if (error instanceof DomainError && error.httpStatusCode >= 400 && error.httpStatusCode <= 599) {
+      res.status(error.httpStatusCode).json({ error: error.message });
+      return;
+    }
+    const message = error instanceof Error ? error.message : 'Unknown error';
+    res.status(500).json({ error: message });
+  }
+
   private ok(res: Response, result: IngestContentResult): void {
     const response: IngestResponse = {
       success: true,
@@ -116,8 +126,7 @@ export class IngestionController {
 
       this.ok(res, await this.ingestionService.ingestPDF(input));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(500).json({ error: message });
+      this.fail(res, error);
     }
   }
 
@@ -148,8 +157,7 @@ export class IngestionController {
 
       this.ok(res, await this.ingestionService.ingestImage(input));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(500).json({ error: message });
+      this.fail(res, error);
     }
   }
 
@@ -178,8 +186,7 @@ export class IngestionController {
 
       this.ok(res, await this.ingestionService.ingestText(input));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(500).json({ error: message });
+      this.fail(res, error);
     }
   }
 
@@ -208,8 +215,7 @@ export class IngestionController {
 
       this.ok(res, await this.ingestionService.ingestURL(input));
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(500).json({ error: message });
+      this.fail(res, error);
     }
   }
 
@@ -222,8 +228,7 @@ export class IngestionController {
       const types = this.ingestionService.getSupportedTypes();
       res.status(200).json({ types });
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      res.status(500).json({ error: message });
+      this.fail(res, error);
     }
   }
 }

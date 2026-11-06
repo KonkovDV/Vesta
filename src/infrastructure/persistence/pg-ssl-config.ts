@@ -28,8 +28,8 @@ export interface PgSslConfig {
  *
  * When DB_SSL_CA is provided, server certificate is validated against the CA.
  * When DB_SSL_CERT + DB_SSL_KEY are provided, client-side mTLS is enabled.
- * Legacy behavior (DB_SSL=true without CA) defaults to rejectUnauthorized: false
- * for backward compatibility, but logs a warning.
+ * DB_SSL=true verifies the server certificate with the system CAs.
+ * DB_SSL_REJECT_UNAUTHORIZED=false turns that check off and logs a warning.
  */
 export function buildPgSslConfig(config: Record<string, string | undefined>): TlsOptions | undefined {
   if (config.DB_SSL !== 'true') {
@@ -47,17 +47,9 @@ export function buildPgSslConfig(config: Record<string, string | undefined>): Tl
   const cert = certPath ? readFileSafe(certPath, true) : undefined;
   const key = keyPath ? readFileSafe(keyPath, true) : undefined;
 
-  // Determine rejectUnauthorized:
-  // - If explicitly set via env var, use that
-  // - If CA is provided, default to true (secure)
-  // - Legacy fallback: false (insecure but backward-compatible)
-  let rejectUnauthorized: boolean;
-  if (rejectUnauthorizedRaw !== undefined) {
-    rejectUnauthorized = rejectUnauthorizedRaw !== 'false';
-  } else if (ca) {
-    rejectUnauthorized = true;
-  } else {
-    rejectUnauthorized = false;
+  const rejectUnauthorized = rejectUnauthorizedRaw !== 'false';
+  if (rejectUnauthorizedRaw === 'false') {
+    console.warn('[pg-ssl] certificate verification is off because DB_SSL_REJECT_UNAUTHORIZED=false');
   }
 
   return {

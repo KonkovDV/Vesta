@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.6.0
+
+- A document URL the SSRF guard blocks answers 400 from ingestion. A private literal host is refused before the HTTP client runs. An unexpected ingestion failure stays 500. V-46, MP-K59. `tests/unit/ingestion-ssrf-status.test.ts`.
+- `DB_SSL=true` verifies the PostgreSQL server certificate. `DB_SSL_REJECT_UNAUTHORIZED=false` is the explicit opt-out. MP-K34. `tests/unit/pg-ssl-config.test.ts`.
+
 ## 4.5.0
 
 - `USE_MOCK_AI=true` makes `LLMAdapterFactory` return a local adapter that does not call a provider. The text is empty and `metadata.mock` is true. Without the flag and without a key the factory still throws. MP-K35. `tests/unit/llm-adapter-factory-mock.test.ts`.

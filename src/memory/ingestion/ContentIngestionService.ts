@@ -23,6 +23,7 @@ import type {
   IngestRejection,
   IngestibleContentType,
 } from './types';
+import { SecurityError } from '../../domain/errors/DomainError';
 import { chunkText, mergeChunkFacts } from './TextChunker';
 
 function assertPublicHttpUrl(raw: string): void {
@@ -30,10 +31,10 @@ function assertPublicHttpUrl(raw: string): void {
   try {
     url = new URL(raw);
   } catch {
-    throw new Error('Only http and https URLs can be ingested');
+    throw new SecurityError('Only http and https URLs can be ingested');
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    throw new Error('Only http and https URLs can be ingested');
+    throw new SecurityError('Only http and https URLs can be ingested');
   }
   const host = url.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   const privateLiteral = host === 'localhost'
@@ -43,7 +44,7 @@ function assertPublicHttpUrl(raw: string): void {
     || host === '169.254.169.254'
     || /^(127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host);
   if (privateLiteral) {
-    throw new Error('URL host is not allowed');
+    throw new SecurityError('URL host is not allowed');
   }
 }
 

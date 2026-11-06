@@ -99,7 +99,7 @@
 
 ```text
 Ты работаешь в репозитории KonkovDV/Vesta (пакет microphoenix), база — последний коммит ветки
-с этим файлом (4.5.0). Вход: docs/audit/2026-10-24/02_WORK_PLAN_FOR_AI.md, этот файл (04),
+с этим файлом (4.6.0). Вход: docs/audit/2026-10-24/02_WORK_PLAN_FOR_AI.md, этот файл (04),
 ADR-0004 и ADR-0005, KNOWN_ISSUES.md, docs/claims.md, docs/limitations.md, AGENTS.md.
 
 0. Среда: Node 24, PostgreSQL ≥ 16 с pgvector ≥ 0.8, Redis 7 и Redis ≥ 8.6. Базовая линия с
@@ -112,7 +112,7 @@ ADR-0004 и ADR-0005, KNOWN_ISSUES.md, docs/claims.md, docs/limitations.md, AGEN
 2. T2.3 шаг 2: перевести на container.inject модули, которые резолвят публичные порты, снизить
    tests/gates/di-literal-budget.json до нового счёта. Потолок только вниз.
 3. MP-K35 закрыт в 4.5.0. Потолок resolve-all — `IUnitOfWork` и `ISandboxPool`. Дальше только вниз.
-4. T2.4 из реестра 03: V-45 закрыт в 4.5.0 (`GET /health/migration` требует ключ). Остаётся V-46 (блок SSRF при загрузке → 4xx).
+4. T2.4 из реестра 03: V-45 закрыт в 4.5.0, V-46 закрыт в 4.6.0 (блок SSRF при загрузке отвечает 400).
 5. MP-K26: десятиминутный бан только при заданном `TRUST_PROXY` (4.5.0). Общее ведро по `req.ip` без доверенного прокси остаётся.
 6. Каждая задача: тест, падающий на текущем коде, затем исправление. Одна задача — один коммит;
    CHANGELOG, KNOWN_ISSUES, claims/limitations, версия в package.json, package-lock.json,
