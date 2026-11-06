@@ -15,10 +15,7 @@ import type { IOutbox } from '../../../domain/events/outbox.interface';
 import type { IEventStore } from '../../../domain/events/event-store.interface';
 import type { PostgreSQLOutboxConfig } from '../../events/postgres-outbox';
 import { createLLMAdapterFactoryFromEnv } from '../../factories/LLMAdapterFactory';
-import { MasEventsRedisStreamsProducer } from '../../mas/MasEventsRedisStreamsProducer';
-import { createMasRedisStreamsClientFromEnv, MasRedisStreamsClient } from '../../mas/MasRedisStreamsClient';
-import { MasEventsRedisStreamsProjector, MasReadModelsRepository } from '../../mas/MasEventsRedisStreamsProjector';
-import { isMasRedisStreamsProducerEnabled, isMasRedisStreamsProjectorsEnabled } from '../../../core/config/app-config';
+import { MasReadModelsRepository } from '../../mas/mas-read-models';
 import type { MasExecutionStore } from '../../../domain/mas/MasExecutionStore';
 import type { IDatabaseConnection } from '../../../domain/persistence/IDatabaseConnection';
 import { MasDurableExecutionService } from '../../../domain/mas/services/MasDurableExecutionService';
@@ -164,7 +161,6 @@ export async function registerEventServices(): Promise<void> {
       }
 
       // Регистрация IEventBus
-      // Регистрация IEventBus
       if (!container.isRegistered(DI_TOKENS.IEventBus)) {
         container.register('IEventBus', () => {
           const bus = createRedisEventBusFromEnv();
@@ -174,93 +170,6 @@ export async function registerEventServices(): Promise<void> {
           tags: ['event-sourcing', 'infrastructure', 'redis'],
           description: 'Redis Event Bus implementation',
         });
-      }
-
-      const masStreamsProducerEnabled = isMasRedisStreamsProducerEnabled();
-      const masStreamsProjectorsEnabled = isMasRedisStreamsProjectorsEnabled();
-      const masStreamsAnyEnabled = masStreamsProducerEnabled || masStreamsProjectorsEnabled;
-
-      if (masStreamsAnyEnabled) {
-        if (!container.isRegistered(DI_TOKENS.MasRedisStreamsClient)) {
-          container.register(
-            'MasRedisStreamsClient',
-            () => createMasRedisStreamsClientFromEnv(),
-            {
-              lifecycle: 'singleton',
-              tags: ['mas', 'events', 'redis-streams'],
-              description:
-                'Redis Streams client for MAS events pilot (mas:events stream; R2.3 observability/CQRS pipeline)',
-            },
-          );
-        }
-      }
-
-      if (masStreamsProducerEnabled) {
-        container.register(
-          'MasEventsRedisStreamsProducer',
-          (c) => {
-            const busInstance = c.resolve<IEventBus>(DI_TOKENS.IEventBus);
-            const client = c.resolve<MasRedisStreamsClient>(DI_TOKENS.MasRedisStreamsClient);
-            const producer = new MasEventsRedisStreamsProducer(busInstance, client);
-
-            void producer.initialize().catch((error: unknown) => {
-               
-              console.error(
-                '[MasEventsRedisStreamsProducer] Failed to initialize MAS Redis Streams producer',
-                error,
-              );
-            });
-
-            return producer;
-          },
-          {
-            lifecycle: 'singleton',
-            tags: ['mas', 'events', 'redis-streams', 'producer'],
-            description:
-              'MAS events → Redis Streams producer (EventBus tap for mas.session.* / mas.task.*; R2.3 pilot)',
-          },
-        );
-      }
-
-      if (masStreamsProjectorsEnabled) {
-        container.register(
-          'MasReadModelsRepository',
-          (c) => {
-            const db = c.resolve<IDatabaseConnection>(DI_TOKENS.IDatabaseConnection);
-            return new MasReadModelsRepository(db);
-          },
-          {
-            lifecycle: 'singleton',
-            tags: ['mas', 'events', 'read-model', 'postgresql'],
-            description:
-              'MAS sessions/tasks CQRS read models repository (mas_session_read_model, mas_task_stats_read_model; R2.3 pilot)',
-          },
-        );
-
-        container.register(
-          'MasEventsRedisStreamsProjector',
-          (c) => {
-            const client = c.resolve<MasRedisStreamsClient>(DI_TOKENS.MasRedisStreamsClient);
-            const repo = c.resolve<MasReadModelsRepository>(DI_TOKENS.MasReadModelsRepository);
-            const projector = new MasEventsRedisStreamsProjector(client, repo);
-
-            void projector.start().catch((error: unknown) => {
-               
-              console.error(
-                '[MasEventsRedisStreamsProjector] Failed to start MAS Redis Streams projector',
-                error,
-              );
-            });
-
-            return projector;
-          },
-          {
-            lifecycle: 'singleton',
-            tags: ['mas', 'events', 'redis-streams', 'projector'],
-            description:
-              'MAS Redis Streams → Postgres CQRS read models projector (mas:events → mas_session_read_model / mas_task_stats_read_model; R2.3 pilot)',
-          },
-        );
       }
 
       // Регистрация IOutbox (обязательный для production, Outbox-first паттерн)
@@ -457,7 +366,12 @@ export async function initializeEventServicesSchema(): Promise<void> {
       }
     }
 
-     
+    if (container.isRegistered(DI_TOKENS.IDatabaseConnection)) {
+      const db = container.resolve<IDatabaseConnection>(DI_TOKENS.IDatabaseConnection);
+      await new MasReadModelsRepository(db).initialize();
+      console.log('✓ MAS read models checked');
+    }
+
     console.log('✅ Events infrastructure schemas initialized successfully');
   } catch (error) {
      

@@ -13,7 +13,7 @@ import { PostgresAdapter } from '../../src/infrastructure/database/PostgresAdapt
 import { PostgresSkillRelationGraphAdapter } from '../../src/infrastructure/agents/PostgresSkillRelationGraphAdapter';
 import { PostgresFeatureFlagsStore } from '../../src/infrastructure/feature-flags/PostgresFeatureFlagsStore';
 import { PostgresSpendStateStore } from '../../src/infrastructure/finops/PostgresSpendStateStore';
-import { MasReadModelsRepository } from '../../src/infrastructure/mas/MasEventsRedisStreamsProjector';
+import { MasReadModelsRepository } from '../../src/infrastructure/mas/mas-read-models';
 import { PostgresMasExecutionStore } from '../../src/infrastructure/mas/PostgresMasExecutionStore';
 import { PostgresTipStore } from '../../src/infrastructure/memory/stores/PostgresTipStore';
 import { PostgresTrajectoryStore } from '../../src/infrastructure/memory/stores/PostgresTrajectoryStore';

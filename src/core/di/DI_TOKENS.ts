@@ -1535,14 +1535,6 @@ export const DI_TOKENS = {
   IntegrationHub: 'IntegrationHub' as const,
   /** @see docs: 07-MULTI_AGENT_SYSTEMS/MAS_RUNTIME_CORE_ARCHITECTURE.md#5.2.-Связь-с-Memory-и-PolicyEngine */
   PolicyEngine: 'PolicyEngine' as const,
-  /** @see docs: 04-REFERENCE/testing-patterns.md#R2.3-MAS-events-Streams-+-CQRS-tests */
-  MasRedisStreamsClient: 'MasRedisStreamsClient' as const,
-  /** @see docs: 04-REFERENCE/testing-patterns.md#R2.3-MAS-events-Streams-+-CQRS-tests */
-  MasEventsRedisStreamsProducer: 'MasEventsRedisStreamsProducer' as const,
-  /** @see docs: docs/protocols/singularity/SINGULARITY_PORTS_SPECIFICATION.md#top */
-  MasReadModelsRepository: 'MasReadModelsRepository' as const,
-  /** @see docs: 04-REFERENCE/testing-patterns.md#R2.3-MAS-events-Streams-+-CQRS-tests */
-  MasEventsRedisStreamsProjector: 'MasEventsRedisStreamsProjector' as const,
   /** @see docs: 06-AI_SYSTEMS_ARCHITECTURE/DI_TOPOLOGY.md#events_llm-12-services */
   IMasCircuitBreakerAdvisor: 'IMasCircuitBreakerAdvisor' as const,
   /** @see docs: 07-MULTI_AGENT_SYSTEMS/MAS_RUNTIME_CORE_ARCHITECTURE.md#6.5.3.-Поток-CIRCUIT_OPEN-end‑to‑end */

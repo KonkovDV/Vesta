@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.8.4
+
+- The second MAS event path is gone: a Redis stream named `mas:events`, its producer, and its projector. Those flags were not copied into configuration, so they could not turn the path on. MAS session and task read-model tables are still checked at startup. The kernel event bus remains Redis Streams. MP-K65.
+
 ## 4.8.3
 
 - The event store writes and reads one table, `events`. The untested `events_v2` dual-write, shadow read, and cutover modes are gone. An append still locks the aggregate and reads `MAX(aggregate_version)`. MP-K64.
