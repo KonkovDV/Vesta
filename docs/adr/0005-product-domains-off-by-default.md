@@ -34,6 +34,8 @@ Kernel booted with the CI gate environment on PostgreSQL 16 and Redis 7, three b
 
 Step 1 shrinks what a deployment exposes and runs. It does not shrink memory or the import graph: the product modules are still imported. The memory target of T2.1 needs step 2.
 
+The table is the 4.0.0 measurement. The 4.3.0 resolve-all gate with the flags unset registered 326 tokens, not 327: `IDeepResearchService` is registered only when the research domain is on (MP-K57). Routes stayed 50.
+
 ## Consequences
 
 - A deployment that served sales, HR, or healthcare routes, or used research or x402 services, sets the matching flag when it moves to 4.0.0. That is why this is a major version.

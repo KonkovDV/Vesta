@@ -29,7 +29,7 @@ If this page disagrees with [docs/limitations.md](docs/limitations.md) or [docs/
 
 ## What is claimed
 
-The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs typecheck, `npm test` on Node 24 and 26, the build, the production audit, and an integration job with pgvector and Redis. That job also resolves every DI token against a fixed ceiling and requests every route without a key. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
+The process entry, the pin, the outbox, and the approval gate are listed in [docs/claims.md](docs/claims.md). This repository does not start a cron timer. The workflow badge runs typecheck, `npm test` on Node 24 and 26, the build, the production audit, and an integration job with pgvector on Redis 7 and Redis 8.10. That job resolves every DI token against a fixed ceiling and requests every route without a key, once with the product domains off and once with every `MODULE_*_ENABLED` flag on. Cite [CITATION.cff](CITATION.cff) together with the commit you pinned.
 
 ## What is not claimed
 
