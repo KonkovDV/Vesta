@@ -6,11 +6,11 @@ authors:
   - family-names: Konkov
     given-names: DV
 license: MIT
-version: 4.8.1
+version: 4.8.2
 date-released: "2026-11-06"
 repository-code: https://github.com/KonkovDV/Vesta
 abstract: >
-  Event-sourced server kernel published as Vesta, package version 4.8.1.
+  Event-sourced server kernel published as Vesta, package version 4.8.2.
   A product pins one commit. Since 3.0.0 the default bus is Redis Streams;
   Pub/Sub is selected only with EVENT_BUS_TRANSPORT=pubsub. Since 4.0.0 the
   sales, HR, healthcare, research, and x402 domains stay off unless

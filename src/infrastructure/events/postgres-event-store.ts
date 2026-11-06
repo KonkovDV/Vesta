@@ -27,6 +27,7 @@ import { CorrelationIdProvider } from '../../core/correlation/correlation';
 import { isValidPostgresIdentifier, qualifyIdentifier } from '../database/postgres-identifiers';
 import { requireQualifiedTables, runtimeDdlEnabled } from '../database/runtime-ddl';
 import { endPool } from '../database/end-pool';
+import { lockAggregateForWrite } from './postgres-outbox';
 import { getConfig } from '../../config';
 import { tryJsonParse } from '../../core/utils/json';
 import { ConcurrencyError } from '../../domain/errors/DomainError';
@@ -423,8 +424,11 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
       const client = await this.pool.connect();
       try {
         await client.query('BEGIN');
-        // SERIALIZABLE + FOR UPDATE предотвращают гонки версий при конкурентных записях
-        await client.query('SET TRANSACTION ISOLATION LEVEL SERIALIZABLE');
+        // Writers of one aggregate queue on a transaction lock, then read the
+        // committed maximum version. Locking only the previous head row misses
+        // an insert that landed after that row. READ COMMITTED is enough: the
+        // unique version index rejects a duplicate, and this lock stops the race.
+        await lockAggregateForWrite(client, aggregateId);
 
         const usePartitionedWritePrimary = this.isPartitionedWritePrimary();
         const versionSourceTable = usePartitionedWritePrimary
@@ -432,12 +436,9 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
           : `${this.schema}.${this.eventsTable}`;
 
         const latestRes = await client.query(
-          `SELECT aggregate_version AS v
+          `SELECT COALESCE(MAX(aggregate_version), 0) AS v
            FROM ${versionSourceTable}
-           WHERE aggregate_id = $1
-           ORDER BY aggregate_version DESC
-           LIMIT 1
-           FOR UPDATE`,
+           WHERE aggregate_id = $1`,
           [aggregateId],
         );
         const currentVersion =
