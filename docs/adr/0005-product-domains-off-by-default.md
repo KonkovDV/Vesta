@@ -18,7 +18,7 @@ Step 1, in 4.0.0:
 2. Off means: no use cases, no controllers, no infrastructure services, no workers, no routes for that domain. `src/config/product-domains.ts` is the only place that reads the flags.
 3. With every flag on, the kernel registers and mounts what 3.0.1 did. CI runs the resolve-all and route gates both ways.
 
-Step 2, next: each domain becomes a `KernelExtension` in its product repository, pinned to a kernel commit, and its code and flag leave this tree. Step 3: dependencies that only those products use become optional.
+Step 2, started: the x402 payment adapters and payment services are imported only inside the branch that runs when `MODULE_X402_ENABLED` is true (`tests/unit/x402-lazy-import.test.ts`). A2A task running stays in the kernel import graph. Sales, HR, healthcare, and research code are still imported when their flags are off. RSS was not measured for this slice.
 
 ## Measured
 

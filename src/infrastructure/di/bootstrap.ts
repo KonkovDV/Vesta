@@ -242,7 +242,7 @@ export async function bootstrap(config: BootstrapConfig = {}): Promise<typeof co
     registerAgenticEvaluation();
     registerAgenticPlanning();
     registerAgenticChains();
-    registerAgenticInterAgent();
+    await registerAgenticInterAgent();
     registerAgenticAdvanced();
     registerAgenticCrossCutting();
     registerSota2026MultiAgentModule();

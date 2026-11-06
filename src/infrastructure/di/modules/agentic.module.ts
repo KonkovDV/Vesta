@@ -52,13 +52,6 @@ import { McpToolConsumerAdapter } from '../../mcp/McpToolConsumerAdapter';
 import { A2ATaskRunnerAdapter } from '../../a2a/A2ATaskRunnerAdapter';
 import { A2AStreamTransportAdapter } from '../../a2a/A2AStreamTransportAdapter';
 import { SsrfDnsGuard } from '../../security/SsrfDnsGuard';
-import {
-  HttpA2AX402SettlementAdapter,
-  InMemoryA2AX402NonceStore,
-  InMemoryA2AX402PaymentRepository,
-  ProfiledA2AX402MerchantPolicy,
-} from '../../a2a/A2AX402PaymentAdapters';
-import { InMemoryA2AX402CommerceMeter } from '../../a2a/A2AX402CommerceMeter';
 import { AgentDialogueLoopAdapter } from '../../mas/AgentDialogueLoopAdapter';
 // Wave G
 import { CostAwareModelSelectorAdapter } from '../../routing/CostAwareModelSelectorAdapter';
@@ -74,10 +67,6 @@ import { UserFeedbackCollectorAdapter } from '../../feedback/UserFeedbackCollect
 import { VotingAggregatorAdapter } from '../../evaluation/VotingAggregatorAdapter';
 import { ConcurrencyLimiterAdapter } from '../../execution/ConcurrencyLimiterAdapter';
 import { ToolResultSummarizerAdapter } from '../../agents/ToolResultSummarizerAdapter';
-import {
-  RequireA2AX402PaymentService,
-  SubmitA2AX402PaymentService,
-} from '../../../application/services/a2a/A2AX402PaymentService';
 // Wave I
 import { PQCAuthorizationGuard } from '../../a2a/PQCAuthorizationGuard';
 import { FormalProverAdapter } from '../../evaluation/FormalProverAdapter';
@@ -297,7 +286,7 @@ export function registerAgenticChains(): void {
 // Wave F -> Inter-Agent Communication (Phase 6)
 // -----------------------------------------------------------------------------
 
-export function registerAgenticInterAgent(): void {
+export async function registerAgenticInterAgent(): Promise<void> {
   if (container.isRegistered(DI_TOKENS.IMcpToolConsumer)) {
     return;
   }
@@ -340,7 +329,10 @@ export function registerAgenticInterAgent(): void {
     );
   }, { lifecycle: 'singleton' });
 
-  if (productDomainEnabled('x402')) registerA2AX402Services();
+  if (productDomainEnabled('x402')) {
+    const { registerA2AX402Services } = await import('./x402.module');
+    registerA2AX402Services();
+  }
 
   container.register(DI_TOKENS.IAgentDialogueLoop, (c) => {
     return new AgentDialogueLoopAdapter(
@@ -593,52 +585,3 @@ export function registerContextPruner(): void {
   log.info('IContextPruner registered (OpenClaw Extraction V4)');
 }
 
-
-/** x402 paid A2A execution: a product domain, registered only with MODULE_X402_ENABLED=true (ADR-0005). */
-function registerA2AX402Services(): void {
-  container.register(DI_TOKENS.IA2AX402MerchantPolicy, () => {
-    return new ProfiledA2AX402MerchantPolicy();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402PaymentRepository, () => {
-    return new InMemoryA2AX402PaymentRepository();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402NonceStore, () => {
-    return new InMemoryA2AX402NonceStore();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402SettlementPort, (c) => {
-    return new HttpA2AX402SettlementAdapter(
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IConfigLoader),
-      c.resolve(DI_TOKENS.ISsrfDnsGuard),
-    );
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.IA2AX402CommerceMeter, () => {
-    return new InMemoryA2AX402CommerceMeter();
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.RequireA2AX402PaymentService, (c) => {
-    return new RequireA2AX402PaymentService(
-      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
-      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
-      c.resolve(DI_TOKENS.IEventStore),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
-    );
-  }, { lifecycle: 'singleton' });
-
-  container.register(DI_TOKENS.SubmitA2AX402PaymentService, (c) => {
-    return new SubmitA2AX402PaymentService(
-      c.resolve(DI_TOKENS.IA2AX402PaymentRepository),
-      c.resolve(DI_TOKENS.IA2AX402MerchantPolicy),
-      c.resolve(DI_TOKENS.IA2AX402NonceStore),
-      c.resolve(DI_TOKENS.IA2AX402SettlementPort),
-      c.resolve(DI_TOKENS.IEventStore),
-      c.resolve(DI_TOKENS.IStructuredLogger),
-      c.resolve(DI_TOKENS.IA2AX402CommerceMeter),
-    );
-  }, { lifecycle: 'singleton' });
-}

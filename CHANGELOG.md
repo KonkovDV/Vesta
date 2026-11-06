@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.4.0
+
+- The x402 payment adapters and payment services are imported only when `MODULE_X402_ENABLED` is true. With the flag unset they are not in the process module cache. A2A task running stays loaded. Sales, HR, healthcare, and research are still imported while off. RSS was not measured. ADR-0005, T2.1 step 2. `tests/unit/x402-lazy-import.test.ts`.
+
 ## 4.3.0
 
 Audit of 2.15.0..4.2.0. Every fix below has a test that fails on 4.2.0.
