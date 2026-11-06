@@ -35,8 +35,10 @@ export class EventStoreService {
     return this.appendEvents(events);
   }
 
-  async getEvents(aggregateId: string): Promise<DomainEvent[]> {
-    return this.eventStore.getEvents(aggregateId);
+  async getEvents(aggregateId: string, fromVersion?: number): Promise<DomainEvent[]> {
+    return fromVersion === undefined
+      ? this.eventStore.getEvents(aggregateId)
+      : this.eventStore.getEvents(aggregateId, fromVersion);
   }
 
   async getEventsByAggregateId(aggregateId: string): Promise<DomainEvent[]> {

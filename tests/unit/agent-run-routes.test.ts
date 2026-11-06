@@ -28,7 +28,7 @@ function app(store: InMemoryEventStore) {
     authMw,
     rateLimitMw: (_req, _res, next) => next(),
     events: {
-      getEvents: (id: string) => store.getEvents(id),
+      getEvents: (id: string, fromVersion?: number) => store.getEvents(id, fromVersion),
       appendEvent: async (event) => { await store.saveEvents([event]); },
     },
     runs: service,
@@ -120,4 +120,52 @@ test('a person approves a held call over HTTP; the decision is bound to the argu
     const decided = (await store.getEvents(`agent-run-${started.runId}`)).find((event) => event.type === 'ToolApprovalDecided');
     assert.equal((decided?.payload as { decidedBy?: string }).decidedBy, 'alice');
   });
+});
+
+test('the event stream reads each version once', async () => {
+  const calls: Array<number | undefined> = [];
+  const started = {
+    eventId: 'e1',
+    type: 'AgentRunStarted',
+    aggregateId: 'agent-run-run-1',
+    aggregateVersion: 1,
+    payload: { ownerId: 'alice', tenantId: 't1' },
+    timestamp: new Date(),
+    correlationId: 'c',
+    metadata: {},
+  };
+  const finished = { ...started, eventId: 'e2', type: 'AgentRunFinished', aggregateVersion: 2, payload: {} };
+  const application = express();
+  const authMw: express.RequestHandler = (req, _res, next) => {
+    (req as unknown as { authContext: unknown }).authContext = {
+      userId: 'alice',
+      tenantId: 't1',
+      scopes: ['agents.run'],
+    };
+    next();
+  };
+  registerAgentRunRoutes({
+    app: application,
+    authMw,
+    rateLimitMw: (_req, _res, next) => next(),
+    events: {
+      async getEvents(_id: string, fromVersion?: number) {
+        calls.push(fromVersion);
+        if (fromVersion === undefined) return [started] as never;
+        if (fromVersion <= 1) return [started] as never;
+        return [finished] as never;
+      },
+      async appendEvent() {},
+    },
+    ssePollMs: 10,
+    sseTimeoutMs: 200,
+  });
+  await withServer(application, async (base) => {
+    const response = await fetch(`${base}/api/agents/runs/run-1/events`, { headers: { 'x-user': 'alice' } });
+    assert.equal(response.status, 200);
+    const body = await response.text();
+    assert.match(body, /AgentRunStarted/);
+    assert.match(body, /AgentRunFinished/);
+  });
+  assert.deepEqual(calls.filter((version) => version !== undefined), [1, 2]);
 });

@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.8.1
+
+- The agent-run event stream asks for event versions it has not sent. A disconnect ends the poll wait. V-36, MP-K62. `tests/unit/agent-run-routes.test.ts`.
+
 ## 4.8.0
 
 - A tool profile is the exact registered agent id. `researcher-x`, `researcher.x`, and `architect-1` stay on the minimal profile. MP-K60. `tests/unit/tool-policy-service.test.ts`.
