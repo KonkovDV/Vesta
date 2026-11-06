@@ -14,7 +14,7 @@ export type AgentRunRoutesService = Pick<AgentRunService, 'start'> & Partial<Pic
 export const AGENT_RUN_APPROVE_SCOPE = 'agents.approve';
 
 export interface AgentRunEventReader extends AgentRunCancelWriter {
-  getEvents(aggregateId: string): Promise<DomainEvent[]>;
+  getEvents(aggregateId: string, fromVersion?: number): Promise<DomainEvent[]>;
 }
 
 export function registerAgentRunRoutes(options: {
@@ -228,9 +228,10 @@ async function streamRun(
   res.setHeader('Connection', 'keep-alive');
   const started = Date.now();
   const sent = new Set<string>();
+  let fromVersion = 1;
   let finished = false;
   while (!finished && !clientGone && Date.now() - started <= timeoutMs) {
-    const events = await options.events.getEvents(streamId(runId));
+    const events = await options.events.getEvents(streamId(runId), fromVersion);
     const cursor = lastId ? events.findIndex((event) => event.eventId === lastId) : -1;
     const pending = cursor >= 0 ? events.slice(cursor + 1) : events;
     const delivered = cursor >= 0 ? events.slice(0, cursor + 1) : [];
@@ -238,13 +239,21 @@ async function streamRun(
       break;
     }
     for (const event of pending) {
+      if (clientGone) break;
+      if (event.aggregateVersion >= fromVersion) fromVersion = event.aggregateVersion + 1;
       if (sent.has(event.eventId)) continue;
       sent.add(event.eventId);
       writeSse(res, event);
       if (event.type === 'AgentRunFinished') finished = true;
     }
-    if (finished) break;
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    if (finished || clientGone) break;
+    await new Promise<void>((resolve) => {
+      const timer = setTimeout(resolve, pollMs);
+      res.once('close', () => {
+        clearTimeout(timer);
+        resolve();
+      });
+    });
   }
   res.end();
 }
