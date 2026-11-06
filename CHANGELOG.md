@@ -1,5 +1,10 @@
 # Changelog
 
+## 4.7.0
+
+- An MRI review stores the authenticated user as the reviewer id. A `reviewerId` in the body is not stored. A review without an authenticated user answers 401. The clinical role stays the text the caller sends. MP-K41. `tests/unit/mri-review-identity.test.ts`.
+- The ingress limiter keys a request that carries `Authorization` by a hash of that header, so two credentials on one address do not share a bucket. A request without the header still keys by `req.ip`. MP-K26. `tests/unit/rate-limiter-penalty.test.ts`.
+
 ## 4.6.0
 
 - A document URL the SSRF guard blocks answers 400 from ingestion. A private literal host is refused before the HTTP client runs. An unexpected ingestion failure stays 500. V-46, MP-K59. `tests/unit/ingestion-ssrf-status.test.ts`.

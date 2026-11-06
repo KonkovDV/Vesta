@@ -76,6 +76,7 @@ export const SecondOpinionAssessmentSchema = z.object({
 
 export const HumanReviewDispositionSchema = z.object({
   reviewerRole: z.string().min(1).max(128),
+  reviewerId: z.string().min(1).max(128).optional(),
   decision: z.enum(['accepted', 'modified', 'rejected', 'escalated']),
   modifications: z.string().max(4000).optional(),
   clinicalNotes: z.string().max(4000).optional(),

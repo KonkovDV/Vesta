@@ -102,6 +102,7 @@ export class MriDeliveryWorker {
         outcome: 'delivered',
         modelId: mriCase.modelId ?? undefined,
         reviewerRole: mriCase.humanReview?.reviewerRole,
+        reviewerId: mriCase.humanReview?.reviewerId,
         reviewerDecision: mriCase.humanReview?.decision,
         safetyFlags: mriCase.safetyFlags,
       });

@@ -1,4 +1,5 @@
 
+import { createHash } from 'node:crypto';
 import type { Request, Response, NextFunction } from 'express-serve-static-core';
 import { readStr } from '../../core/config/app-config';
 // import Redis from 'ioredis'; // Use if real Redis is available. For now using Memory Fallback to ensure reliability if user has no Redis.
@@ -35,8 +36,17 @@ const cleanupTimer = setInterval(() => {
 cleanupTimer.unref();
 
 
+export function ingressClientKey(req: Request): string {
+  const authorization = req.headers?.authorization;
+  if (typeof authorization === 'string' && authorization.trim().length > 0) {
+    const digest = createHash('sha256').update(authorization).digest('hex');
+    return `key:${digest}`;
+  }
+  return `ip:${req.ip || 'unknown'}`;
+}
+
 export function rateLimiterMiddleware(req: Request, res: Response, next: NextFunction) {
-  const ip = req.ip || 'unknown';
+  const ip = ingressClientKey(req);
   const now = Date.now();
   
   if (!state.has(ip)) {
@@ -49,7 +59,7 @@ export function rateLimiterMiddleware(req: Request, res: Response, next: NextFun
   if (now < client.bannedUntil) {
     const retryAfter = Math.ceil((client.bannedUntil - now) / 1000);
     res.setHeader('Retry-After', retryAfter);
-    res.status(403).json({ error: 'IP Banned: Too many violations. Cool down.', retryAfter });
+    res.status(403).json({ error: 'Too many violations. Cool down.', retryAfter });
     return;
   }
 

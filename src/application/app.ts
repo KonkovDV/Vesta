@@ -31,7 +31,7 @@ import { FeatureFlagsService } from './services/FeatureFlagsService';
 
 import { createAuthMiddleware, createRateLimitMiddleware, createFeatureFlagsAdminMiddleware } from './middleware/auth';
 import { applyTransportSecurity } from './middleware/transport-security';
-import { rateLimiterMiddleware } from './middleware/rate-limiter.middleware';
+import { ingressClientKey, rateLimiterMiddleware } from './middleware/rate-limiter.middleware';
 import { RequestContextMiddleware, RequestContext } from './context/request-context';
 import { createEventStoreMiddleware } from './middleware/event-store.middleware';
 import { createUploadMiddleware } from './middleware/upload.middleware';
@@ -180,7 +180,7 @@ function createIngressRateLimitMiddleware(
 
   return async (req: ExpressRequest, res: ExpressResponse, next: NextFunction) => {
     try {
-      const identifier = getClientIdentifier(req);
+      const identifier = ingressClientKey(req);
       // The bucket is per client; a query string or an id in the path must not open a new one.
       const endpoint = '/api';
       const result = await httpRateLimiter.checkLimit(identifier, endpoint, 1);

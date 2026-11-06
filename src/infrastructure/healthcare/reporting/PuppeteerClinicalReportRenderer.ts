@@ -67,6 +67,7 @@ export class PuppeteerClinicalReportRenderer implements IClinicalReportRenderer 
       <div><span class="label">Outcome:</span> ${escapeHtml(input.outcome)}</div>
       <div><span class="label">Model:</span> ${escapeHtml(input.modelId ?? 'not-recorded')}</div>
       <div><span class="label">Reviewer:</span> ${escapeHtml(input.reviewerRole ?? 'not-recorded')}</div>
+      <div><span class="label">Reviewer id:</span> ${escapeHtml(input.reviewerId ?? 'not-recorded')}</div>
       <div><span class="label">Review decision:</span> ${escapeHtml(input.reviewerDecision ?? 'not-recorded')}</div>
     </div>
     <div class="section">

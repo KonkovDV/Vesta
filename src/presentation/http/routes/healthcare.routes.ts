@@ -9,8 +9,8 @@ import type { FinalizeMriSecondOpinionController } from '../controllers/healthca
 
 /**
  * Recording a human review or finalizing it needs this scope as well, so the key that
- * asked for the AI opinion cannot also sign it off. The disposition's `reviewerRole`
- * is still whatever the caller sends.
+ * asked for the AI opinion cannot also sign it off. `reviewerRole` is the clinical
+ * role the caller names. The stored reviewer id is the authenticated user.
  */
 export const HEALTHCARE_REVIEW_SCOPE = 'healthcare.review';
 

@@ -1,12 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { NextFunction, Request, Response } from 'express-serve-static-core';
-import { rateLimiterMiddleware } from '../../src/application/middleware/rate-limiter.middleware';
+import { ingressClientKey, rateLimiterMiddleware } from '../../src/application/middleware/rate-limiter.middleware';
 
-function call(ip: string): number {
+function call(ip: string, authorization?: string): number {
   let status = 0;
   let passed = false;
-  const req = { ip } as Request;
+  const req = {
+    ip,
+    headers: authorization ? { authorization } : {},
+  } as Request;
   const res = {
     setHeader() { return this; },
     status(code: number) { status = code; return this; },
@@ -30,6 +33,22 @@ test('without TRUST_PROXY a shared address is not banned for ten minutes', () =>
     if (previous === undefined) delete process.env.TRUST_PROXY;
     else process.env.TRUST_PROXY = previous;
   }
+});
+
+test('the ingress key hashes the credential and keeps the address for an anonymous call', () => {
+  const sameAddress = { ip: '203.0.113.8', headers: { authorization: 'Bearer secret' } } as Request;
+  const otherCredential = { ip: '203.0.113.8', headers: { authorization: 'Bearer other' } } as Request;
+  const anonymous = { ip: '203.0.113.8', headers: {} } as Request;
+  const hashed = ingressClientKey(sameAddress);
+  assert.notEqual(hashed, ingressClientKey(otherCredential));
+  assert.equal(hashed.includes('secret'), false);
+  assert.equal(ingressClientKey(anonymous), 'ip:203.0.113.8');
+});
+
+test('two credentials on one address do not share a bucket', () => {
+  const ip = '198.51.100.10';
+  for (let i = 0; i < 140; i += 1) call(ip, 'Bearer key-a');
+  assert.equal(call(ip, 'Bearer key-b'), 200);
 });
 
 test('with TRUST_PROXY the penalty ban applies to that client address', () => {
