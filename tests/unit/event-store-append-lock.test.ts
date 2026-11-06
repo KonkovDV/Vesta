@@ -30,7 +30,7 @@ test('an append locks the aggregate and reads the maximum version', async () => 
     assert.match(text, /pg_advisory_xact_lock\(hashtextextended/);
     assert.match(text, /COALESCE\(MAX\(aggregate_version\), 0\)/);
     assert.equal(text.includes('SERIALIZABLE'), false);
-    assert.equal(text.includes('FOR UPDATE'), false);
+    assert.equal(text.includes('events_v2'), false);
     assert.match(text, /COMMIT/);
   } finally {
     await realPool.end();

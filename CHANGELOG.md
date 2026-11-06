@@ -1,5 +1,9 @@
 # Changelog
 
+## 4.8.3
+
+- The event store writes and reads one table, `events`. The untested `events_v2` dual-write, shadow read, and cutover modes are gone. An append still locks the aggregate and reads `MAX(aggregate_version)`. MP-K64.
+
 ## 4.8.2
 
 - An event-store append locks the aggregate, then reads `MAX(aggregate_version)`. It does not set `SERIALIZABLE` and it does not lock only the previous head row. After a version conflict, an agent run reloads events after the version it holds. V-37, MP-K63. `tests/unit/event-store-append-lock.test.ts`.

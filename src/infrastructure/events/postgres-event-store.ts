@@ -18,10 +18,6 @@ import { getOrCreateCounter, getOrCreateGauge, getOrCreateHistogram } from '../.
 import { buildPgSslConfig } from '../persistence/pg-ssl-config';
 import {
   getMetricsConfig,
-  getEventStoreCutoverMode,
-  getEventStoreWritePrimaryMode,
-  type EventStoreCutoverMode,
-  type EventStoreWritePrimaryMode,
 } from '../../core/config/app-config';
 import { CorrelationIdProvider } from '../../core/correlation/correlation';
 import { isValidPostgresIdentifier, qualifyIdentifier } from '../database/postgres-identifiers';
@@ -49,70 +45,19 @@ interface PostgresEventStoreConfig {
   snapshotsTable?: string;
 }
 
-export interface PartitioningPocStreamDiff {
-  version: number;
-  kind: 'missing_in_poc' | 'missing_in_canonical' | 'mismatch';
-  canonicalEventId?: string;
-  canonicalEventType?: string;
-  pocEventId?: string;
-  pocEventType?: string;
-}
-
-export interface PartitioningPocStreamComparison {
-  aggregateId: string;
-  fromVersion: number;
-  canonicalEvents: DomainEvent[];
-  pocEvents: DomainEvent[];
-  diffs: PartitioningPocStreamDiff[];
-  isMatch: boolean;
-}
-
 const DEFAULT_SCHEMA = 'event_store';
 const DEFAULT_EVENTS_TABLE = 'events';
 const DEFAULT_SNAPSHOTS_TABLE = 'snapshots';
-const DEFAULT_PARTITIONING_POC_EVENTS_TABLE = 'events_v2';
 
 // Prometheus metrics for Event Store (global register); guarded centrally via getMetricsConfig().enabled and not in tests
 const {
   JEST_WORKER_ID,
   NODE_ENV,
   EVENT_STORE_LOGS,
-  EVENT_STORE_PARTITIONING_POC_ENABLED,
-  EVENT_STORE_PARTITIONING_POC_EVENTS_TABLE,
 } = getConfig();
 const isTestEnv = Boolean(JEST_WORKER_ID || NODE_ENV === 'test');
 const { enabled, eventLatencyBucketsMs } = getMetricsConfig();
 const ES_METRICS_ON = enabled && !isTestEnv;
-
-/**
- * Partitioning POC feature flag is evaluated once per process.
- * When disabled (default), PostgresEventStore behaves exactly as before.
- */
-const ES_PARTITIONING_POC_ENABLED =
-  typeof EVENT_STORE_PARTITIONING_POC_ENABLED === 'string' &&
-  EVENT_STORE_PARTITIONING_POC_ENABLED.trim().length > 0 &&
-  !['false', '0', 'no', 'off'].includes(
-    EVENT_STORE_PARTITIONING_POC_ENABLED.toLowerCase(),
-  );
-
-/**
- * Target events table name for the partitioning POC (typically `events_v2`),
- * keeping the canonical monolithic table (`events`) untouched.
- */
-const ES_PARTITIONING_POC_EVENTS_TABLE =
-  EVENT_STORE_PARTITIONING_POC_EVENTS_TABLE &&
-  EVENT_STORE_PARTITIONING_POC_EVENTS_TABLE.length > 0
-    ? EVENT_STORE_PARTITIONING_POC_EVENTS_TABLE
-    : DEFAULT_PARTITIONING_POC_EVENTS_TABLE;
-
-/**
- * High-volume domains for the partitioning POC.
- * For R2.2 we focus on MAS Runtime and Memory related aggregates, which
- * conventionally use `mas.` / `memory.` prefixes in event types.
- *
- * NOTE: this is intentionally conservative and can be extended in follow-up tasks.
- */
-const PARTITIONING_POC_HIGH_VOLUME_EVENT_TYPE_PREFIXES = ['mas.', 'memory.'];
 
 /** Columns the domain event needs. The embedding vector stays out of these reads. */
 const EVENT_READ_COLUMNS =
@@ -157,15 +102,9 @@ const ES_GET_EVENTS_BY_GSN_RANGE_LATENCY_MS = getOrCreateHistogram(
 );
 const ES_MODE_STATE_GAUGE = getOrCreateGauge(
   'event_store_mode_state',
-  'Current Event Store mode state (D/D2) per schema and write_primary_mode',
+  'Current Event Store mode state per schema. The value is 1: one events table.',
   ['schema', 'write_primary_mode'],
 );
-
-const EVENT_STORE_MODE_STATE_VALUES: Record<EventStoreWritePrimaryMode, number> = {
-  events: 1,
-  events_v2_dual: 2,
-  events_v2_only: 3,
-};
 
 export class PostgresEventStore implements IEventStore, ICommitOrderReader, IConsumerCursorStore {
   private readonly pool: Pool;
@@ -176,24 +115,6 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   private readonly qualifiedEventsTable: string;
   private readonly qualifiedSnapshotsTable: string;
   private readonly qualifiedCursorsTable: string;
-  /**
-   * R2.2 partitioning POC controls (C2 dual-write).
-   * When disabled, `pocEventsTable`/`qualifiedPocEventsTable` are unused.
-   */
-  private readonly partitioningPocEnabled: boolean;
-  private readonly pocEventsTable: string;
-  private readonly qualifiedPocEventsTable?: string;
-  /**
-   * R2.4 cutover mode skeleton (C1).
-   * Controls planned routing between canonical events table and partitioned events_v2.
-   * For C1 it is configuration-only and does not affect read/write queries.
-   */
-  private readonly cutoverMode: EventStoreCutoverMode;
-  /**
-   * R2.4-D2 write-primary mode (State D vs D2a/D2b).
-   * Controls which physical table is canonical for write/GSN/concurrency.
-   */
-  private readonly writePrimaryMode: EventStoreWritePrimaryMode;
 
   constructor(private readonly cfg: PostgresEventStoreConfig, private readonly logger?: IStructuredLogger) {
     this.pool = new Pool({
@@ -240,48 +161,6 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
       'consumer_cursors',
       'PostgresEventStore.consumerCursors',
     );
-
-    // R2.2-C2: evaluate partitioning POC settings once per instance based on process-level flags.
-    this.partitioningPocEnabled = ES_PARTITIONING_POC_ENABLED;
-    this.pocEventsTable = ES_PARTITIONING_POC_EVENTS_TABLE;
-
-    if (this.partitioningPocEnabled) {
-      if (!isValidPostgresIdentifier(this.pocEventsTable)) {
-        throw new Error(
-          `Invalid PostgreSQL Event Store partitioning POC events table name: "${this.pocEventsTable}"`,
-        );
-      }
-
-      this.qualifiedPocEventsTable = qualifyIdentifier(
-        this.schema,
-        this.pocEventsTable,
-        'PostgresEventStore.events_poc',
-      );
-    } else {
-      this.qualifiedPocEventsTable = undefined;
-    }
-
-    // R2.4-C1: snapshot cutover mode from configuration without altering behaviour.
-    this.cutoverMode = getEventStoreCutoverMode();
-
-    // R2.4-D2: snapshot write-primary mode (State D vs D2a/D2b). Default keeps State D.
-    this.writePrimaryMode = getEventStoreWritePrimaryMode();
-
-    if (ES_METRICS_ON) {
-      try {
-        const modeCode = EVENT_STORE_MODE_STATE_VALUES[this.writePrimaryMode] ?? 0;
-
-        ES_MODE_STATE_GAUGE.set(
-          {
-            schema: this.schema,
-            write_primary_mode: this.writePrimaryMode,
-          },
-          modeCode,
-        );
-      } catch {
-        // Observability must never break core Event Store flows.
-      }
-    }
   }
 
   async initialize(): Promise<void> {
@@ -344,48 +223,6 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
           metadata JSONB
         );
       `);
-
-      if (this.partitioningPocEnabled && this.qualifiedPocEventsTable) {
-        await client.query(`
-          CREATE TABLE IF NOT EXISTS ${this.schema}.${this.pocEventsTable} (
-            event_id VARCHAR(255) NOT NULL,
-            event_type VARCHAR(100) NOT NULL,
-            aggregate_id VARCHAR(255) NOT NULL,
-            aggregate_version INTEGER NOT NULL,
-            correlation_id VARCHAR(255) NOT NULL,
-            causation_id VARCHAR(255),
-            timestamp TIMESTAMP NOT NULL,
-            schema_version INTEGER NOT NULL DEFAULT 1,
-            payload JSONB NOT NULL,
-            metadata JSONB,
-            gsn BIGINT,
-            PRIMARY KEY (aggregate_id, event_id)
-          ) PARTITION BY HASH (aggregate_id);
-        `);
- 
-        for (let i = 0; i < 16; i += 1) {
-          await client.query(`
-            CREATE TABLE IF NOT EXISTS ${this.schema}.${this.pocEventsTable}_p${i}
-            PARTITION OF ${this.schema}.${this.pocEventsTable}
-            FOR VALUES WITH (MODULUS 16, REMAINDER ${i});
-          `);
-        }
- 
-        await client.query(`
-          CREATE INDEX IF NOT EXISTS idx_${this.pocEventsTable}_aggregate
-          ON ${this.schema}.${this.pocEventsTable}(aggregate_id, aggregate_version);
-        `);
- 
-        await client.query(`
-          ALTER TABLE ${this.schema}.${this.pocEventsTable}
-          ALTER COLUMN gsn SET DEFAULT nextval('event_store_events_gsn_seq')
-        `);
- 
-        await client.query(`
-          CREATE INDEX IF NOT EXISTS idx_${this.pocEventsTable}_gsn
-          ON ${this.schema}.${this.pocEventsTable}(gsn);
-        `);
-      }
     } finally {
       client.release();
     }
@@ -430,10 +267,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
         // unique version index rejects a duplicate, and this lock stops the race.
         await lockAggregateForWrite(client, aggregateId);
 
-        const usePartitionedWritePrimary = this.isPartitionedWritePrimary();
-        const versionSourceTable = usePartitionedWritePrimary
-          ? `${this.schema}.${this.pocEventsTable}`
-          : `${this.schema}.${this.eventsTable}`;
+        const versionSourceTable = `${this.schema}.${this.eventsTable}`;
 
         const latestRes = await client.query(
           `SELECT COALESCE(MAX(aggregate_version), 0) AS v
@@ -469,10 +303,6 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
         }
 
         let nextVersion = currentVersion;
-        const saved: Array<{ eventId: string; type: string }> = [];
-
-        const isD2DualWrite =
-          usePartitionedWritePrimary && this.writePrimaryMode === 'events_v2_dual';
 
         // A-008 FIX: Use batch INSERT to prevent pool starvation
         // Build all event data first, then insert in a single query for the primary table
@@ -501,151 +331,34 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
 
         nextVersion = currentVersion + events.length;
 
-        // Build batch INSERT for primary table using unnest for efficiency
-        // This reduces round-trips from N to 1, preventing pool starvation
-        if (!usePartitionedWritePrimary) {
-          // State D: Batch insert into canonical events table
-          const canonicalResult = await client.query(
-            `INSERT INTO ${this.schema}.${this.eventsTable}
-               (event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata)
-             SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::int[], $5::text[], $6::text[], $7::timestamp[], $8::int[], $9::jsonb[], $10::jsonb[])
-             AS t(event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata)
-             RETURNING gsn`,
-            [
-              eventData.map(e => e.eventId),
-              eventData.map(e => e.type),
-              eventData.map(e => e.aggregateId),
-              eventData.map(e => e.version),
-              eventData.map(e => e.correlationId),
-              eventData.map(e => e.causationId),
-              eventData.map(e => e.timestamp),
-              eventData.map(e => e.schemaVersion),
-              eventData.map(e => e.payload),
-              eventData.map(e => e.metadata),
-            ],
+        const canonicalResult = await client.query(
+          `INSERT INTO ${this.schema}.${this.eventsTable}
+             (event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata)
+           SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::int[], $5::text[], $6::text[], $7::timestamp[], $8::int[], $9::jsonb[], $10::jsonb[])
+           AS t(event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata)
+           RETURNING gsn`,
+          [
+            eventData.map(e => e.eventId),
+            eventData.map(e => e.type),
+            eventData.map(e => e.aggregateId),
+            eventData.map(e => e.version),
+            eventData.map(e => e.correlationId),
+            eventData.map(e => e.causationId),
+            eventData.map(e => e.timestamp),
+            eventData.map(e => e.schemaVersion),
+            eventData.map(e => e.payload),
+            eventData.map(e => e.metadata),
+          ],
+        );
+
+        if (canonicalResult.rows.length !== events.length) {
+          throw new Error(
+            `[PostgresEventStore] Batch insert returned ${canonicalResult.rows.length} rows, expected ${events.length}`,
           );
-
-          // Validate GSNs were generated for all events
-          if (canonicalResult.rows.length !== events.length) {
-            throw new Error(
-              `[PostgresEventStore] Batch insert returned ${canonicalResult.rows.length} rows, expected ${events.length}`,
-            );
-          }
-
-          if (this.partitioningPocEnabled && this.qualifiedPocEventsTable) {
-            const pocRows: Array<{ data: (typeof eventData)[number]; gsn: number }> = [];
-            eventData.forEach((data, index) => {
-              const event = events[index];
-              const gsn = canonicalResult.rows[index]?.gsn as number;
-              if (!Number.isFinite(gsn)) {
-                throw new Error(
-                  `[PostgresEventStore] Canonical batch insert did not return valid GSN at index ${index}`,
-                );
-              }
-              if (event && (this.cutoverMode === 'cutover_to_v2' || isPartitioningPocHighVolumeEvent(event))) {
-                pocRows.push({ data, gsn });
-              }
-            });
-            if (pocRows.length > 0) {
-              await client.query('SAVEPOINT event_store_partitioning_poc');
-              try {
-                await client.query(
-                  `INSERT INTO ${this.schema}.${this.pocEventsTable}
-                     (event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata, gsn)
-                   SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::int[], $5::text[], $6::text[], $7::timestamp[], $8::int[], $9::jsonb[], $10::jsonb[], $11::bigint[])
-                     AS t(event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata, gsn)`,
-                  [
-                    pocRows.map((row) => row.data.eventId),
-                    pocRows.map((row) => row.data.type),
-                    pocRows.map((row) => row.data.aggregateId),
-                    pocRows.map((row) => row.data.version),
-                    pocRows.map((row) => row.data.correlationId),
-                    pocRows.map((row) => row.data.causationId),
-                    pocRows.map((row) => row.data.timestamp),
-                    pocRows.map((row) => row.data.schemaVersion),
-                    pocRows.map((row) => row.data.payload),
-                    pocRows.map((row) => row.data.metadata),
-                    pocRows.map((row) => row.gsn),
-                  ],
-                );
-                await client.query('RELEASE SAVEPOINT event_store_partitioning_poc');
-              } catch (pocError) {
-                try {
-                  await client.query('ROLLBACK TO SAVEPOINT event_store_partitioning_poc');
-                } catch {
-                  // ignore rollback errors specific to the POC dual-write path
-                }
-                this.logger?.error(
-                  '[PostgresEventStore] Partitioning POC dual-write failed; main events path preserved',
-                  {
-                    error: (pocError as Error).message,
-                    aggregateId,
-                  },
-                );
-              }
-            }
-          }
-        } else {
-          // State D2a/D2b: Batch insert into partitioned events_v2
-          const partitionedResult = await client.query(
-            `INSERT INTO ${this.schema}.${this.pocEventsTable}
-               (event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata)
-             SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::int[], $5::text[], $6::text[], $7::timestamp[], $8::int[], $9::jsonb[], $10::jsonb[])
-             AS t(event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata)
-             RETURNING gsn`,
-            [
-              eventData.map(e => e.eventId),
-              eventData.map(e => e.type),
-              eventData.map(e => e.aggregateId),
-              eventData.map(e => e.version),
-              eventData.map(e => e.correlationId),
-              eventData.map(e => e.causationId),
-              eventData.map(e => e.timestamp),
-              eventData.map(e => e.schemaVersion),
-              eventData.map(e => e.payload),
-              eventData.map(e => e.metadata),
-            ],
-          );
-
-          if (partitionedResult.rows.length !== events.length) {
-            throw new Error(
-              `[PostgresEventStore] Partitioned batch insert returned ${partitionedResult.rows.length} rows, expected ${events.length}`,
-            );
-          }
-
-          if (isD2DualWrite) {
-            const dualRows = eventData.map((data, index) => {
-              const gsn = partitionedResult.rows[index]?.gsn as number;
-              if (!Number.isFinite(gsn)) {
-                throw new Error(
-                  `[PostgresEventStore] Partitioned batch insert did not return valid GSN at index ${index}`,
-                );
-              }
-              return { data, gsn };
-            });
-            await client.query(
-              `INSERT INTO ${this.schema}.${this.eventsTable}
-                 (event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata, gsn)
-               SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::int[], $5::text[], $6::text[], $7::timestamp[], $8::int[], $9::jsonb[], $10::jsonb[], $11::bigint[])
-                 AS t(event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata, gsn)`,
-              [
-                dualRows.map((row) => row.data.eventId),
-                dualRows.map((row) => row.data.type),
-                dualRows.map((row) => row.data.aggregateId),
-                dualRows.map((row) => row.data.version),
-                dualRows.map((row) => row.data.correlationId),
-                dualRows.map((row) => row.data.causationId),
-                dualRows.map((row) => row.data.timestamp),
-                dualRows.map((row) => row.data.schemaVersion),
-                dualRows.map((row) => row.data.payload),
-                dualRows.map((row) => row.data.metadata),
-                dualRows.map((row) => row.gsn),
-              ],
-            );
-          }
         }
 
         // Build saved events list and emit metrics/logs
+        const saved: Array<{ eventId: string; type: string }> = [];
         for (let i = 0; i < events.length; i++) {
           const e = events[i];
           const data = eventData[i];
@@ -759,13 +472,9 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
 
   /**
    * True when this aggregate already has one event of the type.
-   * The common path reads no payload. Cutover and shadow-read keep the full read.
+   * The common path reads no payload.
    */
   async hasEventOfType(aggregateId: string, eventType: string): Promise<boolean> {
-    if (this.isPartialCutoverReadEnabled() || this.isShadowReadEnabled()) {
-      const events = await this.getEvents(aggregateId);
-      return events.some((event) => event.type === eventType);
-    }
     const res = await this.pool.query(
       `SELECT 1
        FROM ${this.schema}.${this.eventsTable}
@@ -777,51 +486,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   }
 
   async getEvents(aggregateId: string, fromVersion = 1): Promise<DomainEvent[]> {
-    // R2.4-C3: partial cutover State C.
-    // For a subset of domains/aggregates whose streams are fully present and
-    // consistent in the partitioned events_v2 table, attempt to use events_v2
-    // as the primary read-path with safe rollback to canonical events.
-    const canonicalEvents = await this.getCanonicalEvents(aggregateId, fromVersion);
-
-    if (this.isPartialCutoverReadEnabled()) {
-      const partitionedEvents = await this.tryGetEventsFromPartitionedPrimary(
-        aggregateId,
-        fromVersion,
-        canonicalEvents,
-      );
-
-      if (partitionedEvents) {
-        return partitionedEvents;
-      }
-
-      // For cutover_to_v2, when partial cutover is enabled but the aggregate is
-      // not yet eligible or partitioned stream is not ready, we fall back to
-      // the canonical events without additional shadow-read diagnostics.
-      return canonicalEvents;
-    }
-
-    if (this.isShadowReadEnabled()) {
-      try {
-        await this.performShadowReadAndCompare(
-          aggregateId,
-          fromVersion,
-          canonicalEvents,
-        );
-      } catch (error) {
-        // Shadow read/compare must never break the primary read-path.
-        this.logger?.error(
-          '[PostgresEventStore] Shadow read/compare failed; canonical events path preserved',
-          {
-            aggregateId,
-            fromVersion,
-            cutoverMode: this.cutoverMode,
-            error: (error as Error).message,
-          },
-        );
-      }
-    }
-
-    return canonicalEvents;
+    return this.getCanonicalEvents(aggregateId, fromVersion);
   }
 
   async getEventsByCorrelationId(correlationId: string): Promise<DomainEvent[]> {
@@ -859,9 +524,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
     const safeLimit =
       typeof limit === 'number' && Number.isFinite(limit) && limit > 0 ? limit : 1;
  
-    const gsnSourceTable = this.isPartitionedWritePrimary()
-      ? `${this.schema}.${this.pocEventsTable}`
-      : `${this.schema}.${this.eventsTable}`;
+    const gsnSourceTable = `${this.schema}.${this.eventsTable}`;
  
     const params: unknown[] = [];
     let whereClause = 'gsn IS NOT NULL';
@@ -905,7 +568,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
         const durationMs = Date.now() - opStart;
  
         ES_GET_EVENTS_BY_GSN_RANGE_LATENCY_MS.labels(
-          this.writePrimaryMode,
+          'events',
           hasCursor ? 'true' : 'false',
         ).observe(durationMs);
       } catch {
@@ -974,9 +637,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   }
 
   async getLatestGsn(): Promise<number | null> {
-    const gsnSourceTable = this.isPartitionedWritePrimary()
-      ? `${this.schema}.${this.pocEventsTable}`
-      : `${this.schema}.${this.eventsTable}`;
+    const gsnSourceTable = `${this.schema}.${this.eventsTable}`;
 
     const res = await this.pool.query(
       `SELECT MAX(gsn) AS max_gsn FROM ${gsnSourceTable} WHERE gsn IS NOT NULL`,
@@ -990,9 +651,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   }
 
   async getLatestEventVersion(aggregateId: string): Promise<number> {
-    const versionSourceTable = this.isPartitionedWritePrimary()
-      ? `${this.schema}.${this.pocEventsTable}`
-      : `${this.schema}.${this.eventsTable}`;
+    const versionSourceTable = `${this.schema}.${this.eventsTable}`;
 
     const res = await this.pool.query(
       `SELECT COALESCE(MAX(aggregate_version), 0) AS v FROM ${versionSourceTable} WHERE aggregate_id = $1`,
@@ -1002,9 +661,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   }
 
   async exists(aggregateId: string): Promise<boolean> {
-    const versionSourceTable = this.isPartitionedWritePrimary()
-      ? `${this.schema}.${this.pocEventsTable}`
-      : `${this.schema}.${this.eventsTable}`;
+    const versionSourceTable = `${this.schema}.${this.eventsTable}`;
 
     const res = await this.pool.query(
       `SELECT 1 FROM ${versionSourceTable} WHERE aggregate_id = $1 LIMIT 1`,
@@ -1014,9 +671,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   }
 
   async getEventCount(aggregateId: string): Promise<number> {
-    const versionSourceTable = this.isPartitionedWritePrimary()
-      ? `${this.schema}.${this.pocEventsTable}`
-      : `${this.schema}.${this.eventsTable}`;
+    const versionSourceTable = `${this.schema}.${this.eventsTable}`;
 
     const res = await this.pool.query(
       `SELECT COUNT(*) AS cnt FROM ${versionSourceTable} WHERE aggregate_id = $1`,
@@ -1033,9 +688,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
   }
 
   async getStats(): Promise<EventStoreStats> {
-    const statsSourceTable = this.isPartitionedWritePrimary()
-      ? `${this.schema}.${this.pocEventsTable}`
-      : `${this.schema}.${this.eventsTable}`;
+    const statsSourceTable = `${this.schema}.${this.eventsTable}`;
 
     const res = await this.pool.query(
       `SELECT COUNT(*) AS total, MAX(timestamp) AS last FROM ${statsSourceTable}`,
@@ -1061,12 +714,12 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
     }
 
     try {
-      const modeCode = EVENT_STORE_MODE_STATE_VALUES[this.writePrimaryMode] ?? 0;
+      const modeCode = 1;
 
       ES_MODE_STATE_GAUGE.set(
         {
           schema: this.schema,
-          write_primary_mode: this.writePrimaryMode,
+          write_primary_mode: 'events',
         },
         modeCode,
       );
@@ -1078,7 +731,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
       ES_LATEST_GSN_GAUGE.set(
         {
           schema: this.schema,
-          write_primary_mode: this.writePrimaryMode,
+          write_primary_mode: 'events',
         },
         latestGsn,
       );
@@ -1091,7 +744,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
       ) {
         const lag = latestGsn - fromExclusiveGsn;
 
-        ES_GSN_LAG_HISTOGRAM.labels(this.writePrimaryMode).observe(lag);
+        ES_GSN_LAG_HISTOGRAM.labels('events').observe(lag);
       }
     } catch {
       // Observability must never break core Event Store flows.
@@ -1106,7 +759,7 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
     try {
       const errorClass = error instanceof ConcurrencyError ? 'ConcurrencyError' : 'Other';
 
-      ES_APPENDS_FAILED_TOTAL.labels(errorClass, this.writePrimaryMode).inc();
+      ES_APPENDS_FAILED_TOTAL.labels(errorClass, 'events').inc();
     } catch {
       // Observability must never break core Event Store flows.
     }
@@ -1120,318 +773,11 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
     try {
       ES_CONCURRENCY_CONFLICTS_TOTAL.labels(
         reason,
-        this.writePrimaryMode,
+        'events',
         constraint || '',
       ).inc();
     } catch {
       // Observability must never break core Event Store flows.
-    }
-  }
-
-  /**
-   * R2.4-D2: determines whether partitioned events_v2 table is the canonical
-   * write/GSN/concurrency source (D2a/D2b).
-   *
-   * When false, State D semantics are used with canonical monolithic events table.
-   */
-  private isPartitionedWritePrimary(): boolean {
-    if (!this.partitioningPocEnabled || !this.qualifiedPocEventsTable) {
-      return false;
-    }
-
-    if (this.writePrimaryMode === 'events_v2_dual' || this.writePrimaryMode === 'events_v2_only') {
-      return true;
-    }
-
-    return false;
-  }
-
-  private isPartialCutoverReadEnabled(): boolean {
-    // R2.4-C3: partial cutover State C is driven by cutoverMode=cutover_to_v2.
-    // Shadow read remains controlled exclusively by isShadowReadEnabled().
-    if (this.cutoverMode !== 'cutover_to_v2') {
-      return false;
-    }
-
-    // Partial cutover relies on the partitioning PoC infrastructure (events_v2).
-    // If the PoC is disabled or the POC table is not configured, we must not
-    // attempt to switch the primary read-path and instead fall back to
-    // canonical-only behaviour.
-    if (!this.partitioningPocEnabled || !this.qualifiedPocEventsTable) {
-      return false;
-    }
-
-    return true;
-  }
-
-  private isShadowReadEnabled(): boolean {
-    if (this.cutoverMode === 'shadow_read' || this.cutoverMode === 'dual_read') {
-      return true;
-    }
-
-    // R2.4-C3: even when cutover_to_v2 enables partial cutover for a subset of
-    // aggregates, shadow-read diagnostics remain disabled for this mode and
-    // are handled explicitly via tryGetEventsFromPartitionedPrimary().
-    if (this.cutoverMode === 'cutover_to_v2') {
-      return false;
-    }
-
-    return false;
-  }
-
-  private async performShadowReadAndCompare(
-    aggregateId: string,
-    fromVersion: number,
-    canonicalEvents: DomainEvent[],
-  ): Promise<void> {
-    // Reuse existing R2.2-C3 comparison helper. Any errors are handled by
-    // the caller of getEvents().
-    const comparison = await this.compareCanonicalAndPocStreamsForAggregate(
-      aggregateId,
-      fromVersion,
-      canonicalEvents,
-    );
-
-    if (!comparison.isMatch && comparison.diffs.length > 0) {
-      const firstDiff = comparison.diffs[0];
-
-      if (EVENT_STORE_LOGS === 'json') {
-        this.logger?.info('event_store_cutover_shadow_read_diff', {
-          aggregate_id: aggregateId,
-          from_version: fromVersion,
-          diffs_count: comparison.diffs.length,
-          first_diff: firstDiff,
-        });
-      } else {
-        this.logger?.info(
-          '[PostgresEventStore] Shadow read detected differences between canonical events and partitioned events_v2',
-          {
-            aggregateId,
-            fromVersion,
-            diffsCount: comparison.diffs.length,
-            firstDiff,
-          },
-        );
-      }
-    }
-  }
-
-  /**
-   * R2.4-C3: attempts to use the partitioned events_v2 table as the primary
-   * read-path for aggregates that are part of the partial cutover (State C).
-   *
-   * Behaviour:
-   * - When the partitioned stream exists and is consistent with canonical, it
-   *   becomes the primary stream returned to callers.
-   * - When the partitioned stream is missing or divergent, the method falls
-   *   back to the canonical events stream, logging structured diagnostics.
-   * - Any unexpected errors during the partitioned read are treated as
-   *   transient and result in a safe fallback to canonical events.
-   *
-   * The subset of aggregates participating in partial cutover is limited to
-   * high-volume MAS/Memory domains, reusing the same heuristic as the
-   * partitioning POC dual-write (isPartitioningPocHighVolumeEvent).
-   */
-  private async tryGetEventsFromPartitionedPrimary(
-    aggregateId: string,
-    fromVersion: number,
-    canonicalEvents: DomainEvent[],
-  ): Promise<DomainEvent[] | null> {
-    if (!this.partitioningPocEnabled || !this.qualifiedPocEventsTable) {
-      return null;
-    }
-
-    if (!canonicalEvents.length) {
-      return null;
-    }
-
-    // R2.4-C4: State D full cutover removes the high-volume MAS/Memory restriction.
-    // All aggregates are eligible for primary read-path from events_v2 when
-    // cutoverMode='cutover_to_v2' and partitioning infra is available.
-
-    try {
-      const pocEvents = await this.getPocEventsForAggregate(aggregateId, fromVersion);
-
-      if (!pocEvents.length) {
-        this.logger?.error(
-          '[PostgresEventStore] Partial cutover primary read from events_v2 missing stream; falling back to canonical events',
-          {
-            aggregateId,
-            fromVersion,
-            cutoverMode: this.cutoverMode,
-          },
-        );
-
-        return canonicalEvents;
-      }
-
-      const comparison = this.buildPartitioningPocStreamComparison(
-        aggregateId,
-        fromVersion,
-        canonicalEvents,
-        pocEvents,
-      );
-
-      if (!comparison.isMatch && comparison.diffs.length > 0) {
-        const firstDiff = comparison.diffs[0];
-
-        this.logger?.error(
-          '[PostgresEventStore] Partial cutover detected differences between canonical events and partitioned events_v2; falling back to canonical events',
-          {
-            aggregateId,
-            fromVersion,
-            cutoverMode: this.cutoverMode,
-            diffsCount: comparison.diffs.length,
-            firstDiff,
-          },
-        );
-
-        return canonicalEvents;
-      }
-
-      return pocEvents;
-    } catch (error) {
-      this.logger?.error(
-        '[PostgresEventStore] Partial cutover primary read from events_v2 failed; falling back to canonical events',
-        {
-          aggregateId,
-          fromVersion,
-          cutoverMode: this.cutoverMode,
-          error: (error as Error).message,
-        },
-      );
-
-      return canonicalEvents;
-    }
-  }
-
-  /**
-   * R2.2-C3: PoC read-path for partitioned events table (e.g. events_v2).
-   * Reads events for a given aggregate from the POC table when partitioning is enabled.
-   *
-   * This method is intentionally not part of the IEventStore contract and is meant
-   * for tooling/tests around the partitioning PoC only.
-   */
-  async getPocEventsForAggregate(
-    aggregateId: string,
-    fromVersion = 1,
-  ): Promise<DomainEvent[]> {
-    this.ensurePartitioningPocReadEnabled();
-
-    const res = await this.pool.query(
-      `SELECT event_id, event_type, aggregate_id, aggregate_version, correlation_id, causation_id, timestamp, schema_version, payload, metadata
-       FROM ${this.schema}.${this.pocEventsTable}
-       WHERE aggregate_id = $1 AND aggregate_version >= $2
-       ORDER BY aggregate_version ASC`,
-      [aggregateId, fromVersion],
-    );
-
-    return res.rows.map(rowToEvent);
-  }
-
-  /**
-   * R2.2-C3: Compares canonical events stream (monolithic events table) with
-   * the partitioned POC stream for the same aggregate.
-   *
-   * Designed for offline analysis and verification of the dual-write PoC. It
-   * does not affect production read-paths; when used from shadow-read mode it
-   * is strictly diagnostic and never alters the returned canonical stream.
-   */
-  async compareCanonicalAndPocStreamsForAggregate(
-    aggregateId: string,
-    fromVersion = 1,
-    canonicalEventsOverride?: DomainEvent[],
-  ): Promise<PartitioningPocStreamComparison> {
-    this.ensurePartitioningPocReadEnabled();
-
-    const canonicalEvents =
-      canonicalEventsOverride ??
-      (await this.getCanonicalEvents(aggregateId, fromVersion));
-    const pocEvents = await this.getPocEventsForAggregate(aggregateId, fromVersion);
-
-    const comparison = this.buildPartitioningPocStreamComparison(
-      aggregateId,
-      fromVersion,
-      canonicalEvents,
-      pocEvents,
-    );
-
-    return comparison;
-  }
-
-  private buildPartitioningPocStreamComparison(
-    aggregateId: string,
-    fromVersion: number,
-    canonicalEvents: DomainEvent[],
-    pocEvents: DomainEvent[],
-  ): PartitioningPocStreamComparison {
-    const canonicalByVersion = new Map<number, DomainEvent>();
-    const pocByVersion = new Map<number, DomainEvent>();
-
-    for (const e of canonicalEvents) {
-      canonicalByVersion.set(e.aggregateVersion, e);
-    }
-    for (const e of pocEvents) {
-      pocByVersion.set(e.aggregateVersion, e);
-    }
-
-    const maxVersion = Math.max(
-      canonicalEvents[canonicalEvents.length - 1]?.aggregateVersion ?? fromVersion - 1,
-      pocEvents[pocEvents.length - 1]?.aggregateVersion ?? fromVersion - 1,
-    );
-
-    const diffs: PartitioningPocStreamDiff[] = [];
-
-    for (let v = fromVersion; v <= maxVersion; v += 1) {
-      const canonical = canonicalByVersion.get(v);
-      const poc = pocByVersion.get(v);
-
-      if (canonical && !poc) {
-        diffs.push({
-          version: v,
-          kind: 'missing_in_poc',
-          canonicalEventId: canonical.eventId,
-          canonicalEventType: canonical.type,
-        });
-      } else if (!canonical && poc) {
-        diffs.push({
-          version: v,
-          kind: 'missing_in_canonical',
-          pocEventId: poc.eventId,
-          pocEventType: poc.type,
-        });
-      } else if (canonical && poc) {
-        if (canonical.eventId !== poc.eventId || canonical.type !== poc.type) {
-          diffs.push({
-            version: v,
-            kind: 'mismatch',
-            canonicalEventId: canonical.eventId,
-            canonicalEventType: canonical.type,
-            pocEventId: poc.eventId,
-            pocEventType: poc.type,
-          });
-        }
-      }
-    }
-
-    return {
-      aggregateId,
-      fromVersion,
-      canonicalEvents,
-      pocEvents,
-      diffs,
-      isMatch: diffs.length === 0,
-    };
-  }
-
-  /**
-   * Internal guard for R2.2-C3 read-path to ensure that PoC is explicitly enabled.
-   */
-  private ensurePartitioningPocReadEnabled(): void {
-    if (!this.partitioningPocEnabled || !this.qualifiedPocEventsTable) {
-      throw new Error(
-        'Partitioning POC read-path requested but EVENT_STORE_PARTITIONING_POC_ENABLED is disabled or POC events table is not configured',
-      );
     }
   }
 
@@ -1446,15 +792,8 @@ export class PostgresEventStore implements IEventStore, ICommitOrderReader, ICon
 
   /**
    * Snapshot plus only the events after it, in one query.
-   * Cutover and shadow-read keep the existing two-query path so those modes stay unchanged.
    */
   async loadAggregate(aggregateId: string): Promise<{ snapshot: Snapshot | null; events: DomainEvent[] }> {
-    if (this.isPartialCutoverReadEnabled() || this.isShadowReadEnabled()) {
-      const snapshot = await this.getSnapshot(aggregateId);
-      const events = await this.getEvents(aggregateId, snapshot ? snapshot.version + 1 : 1);
-      return { snapshot, events };
-    }
-
     const res = await this.pool.query(
       `SELECT
          s.version AS snapshot_version,
@@ -1712,22 +1051,6 @@ function rowToEvent(row: {
   }
 
   return event;
-}
-
-/**
- * R2.2-C2 helper: decides whether a given event should participate in the
- * partitioning POC dual-write based solely on its type prefix.
- *
- * High-volume domains for the POC are MAS Runtime and Memory, using `mas.*`
- * and `memory.*` event type prefixes.
- */
-function isPartitioningPocHighVolumeEvent(event: DomainEvent): boolean {
-  if (!event || typeof event.type !== 'string') {
-    return false;
-  }
-  return PARTITIONING_POC_HIGH_VOLUME_EVENT_TYPE_PREFIXES.some((prefix) =>
-    event.type.startsWith(prefix),
-  );
 }
 
 function generateCorrelationId(): string {
