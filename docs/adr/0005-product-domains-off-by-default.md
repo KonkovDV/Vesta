@@ -44,6 +44,5 @@ The table is the 4.0.0 measurement. The 4.3.0 resolve-all gate with the flags un
 
 ## Sources
 
-- Strangler migration, small reversible steps while the system keeps running: https://dev.to/oluwatosinolamilekan/from-monolith-to-modular-a-strangler-migration-playbook-527p
-- Modular monolith to services, modules meet through interfaces, extraction order: https://dev.to/sepehr/from-monolith-to-modular-monolith-to-microservices-realistic-migration-patterns-36f2
-- Identify the core before strangling: https://view.ceros.com/persistent-systems/private-equity-whitepaper-1-1-2-2-1-7-1-1-1-1
+- Fowler, *StranglerFigApplication*, 29 June 2004. A new path is added beside the old one and the old path shrinks; the system keeps running. https://martinfowler.com/bliki/StranglerFigApplication.html
+- The interface this step uses is already in the kernel: `KernelExtension` registers services, adds routes, and passes SQL to `microphoenix-migrate --dir` (ADR-0001, ADR-0003). The flag is the reversible first cut. It is not evidence that the import graph shrank.

@@ -33,10 +33,11 @@ Two Redis releases close the remaining gaps of a stream used this way:
 
 ## Sources
 
-- Redis, `XADD` command reference: `KEEPREF | DELREF | ACKED` (since 8.2), `IDMP | IDMPAUTO` (since 8.6). https://redis.io/docs/latest/commands/xadd/
-- Redis, Idempotent message processing (defaults of `IDMP-DURATION` and `IDMP-MAXSIZE`). https://redis.io/docs/latest/develop/data-types/streams/idempotency/
+The Redis pages below are the specification this ADR follows. A blog summary of the same commands is not.
+
+- Redis, `XADD` command reference: option order is `ACKED`, then `IDMP`, then `MAXLEN`; `ACKED` since 8.2, `IDMP` since 8.6. The page also says that when referenced entries exceed `MAXLEN`, trimming stops, so the stream may be longer than the cap. https://redis.io/docs/latest/commands/xadd/
+- Redis, Idempotent message processing: defaults of `IDMP-DURATION` and `IDMP-MAXSIZE`. https://redis.io/docs/latest/develop/data-types/streams/idempotency/
 - Redis, Streaming use case: at-least-once with `XREADGROUP`/`XACK`, the pending list, an `XAUTOCLAIM` sweep, a trim policy. https://redis.io/docs/latest/develop/use-cases/streaming/
-- OneUptime, How to choose between Pub/Sub and Streams in Redis (2026-01-25). https://oneuptime.com/blog/post/2026-01-25-redis-pubsub-vs-streams/markdown
-- Conduktor, Outbox pattern for reliable event publishing (relay at least once, idempotent consumer). https://www.conduktor.io/glossary/outbox-pattern-for-reliable-event-publishing
+- Helland, *Idempotence Is Not a Medical Condition*, Communications of the ACM 55(5), 2012, and Kleppmann, *Designing Data-Intensive Applications*, O'Reilly, 2017: a repeated delivery is not an exactly-once effect. The map from those texts onto this kernel is `docs/research/long-running-case.md`.
 - Redis, `XTRIM` command reference: `~` with the default `LIMIT` of 100 stream nodes per call, `DELREF`. https://redis.io/docs/latest/commands/xtrim/
 - Redis, `XPENDING` command reference: the delivery counter of each pending entry. https://redis.io/docs/latest/commands/xpending/

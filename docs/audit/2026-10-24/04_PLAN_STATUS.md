@@ -83,18 +83,15 @@
 
 ## Источники решений
 
-- Redis, команда `XADD`: `KEEPREF | DELREF | ACKED` с 8.2, `IDMP | IDMPAUTO` с 8.6. https://redis.io/docs/latest/commands/xadd/
+- Redis, команда `XADD`: порядок опций — `ACKED`, затем `IDMP`, затем `MAXLEN`; `ACKED` с 8.2, `IDMP` с 8.6. Если записей, на которые ссылаются группы, больше `MAXLEN`, обрезка останавливается, и поток может быть длиннее предела. https://redis.io/docs/latest/commands/xadd/
 - Redis, идемпотентная обработка сообщений, умолчания `IDMP-DURATION` и `IDMP-MAXSIZE`. https://redis.io/docs/latest/develop/data-types/streams/idempotency/
 - Redis, потоковая обработка: at-least-once через `XREADGROUP`/`XACK`, `XAUTOCLAIM`. https://redis.io/docs/latest/develop/use-cases/streaming/
-- OneUptime, выбор между Pub/Sub и Streams в Redis (2026-01-25). https://oneuptime.com/blog/post/2026-01-25-redis-pubsub-vs-streams/markdown
-- Conduktor, transactional outbox: relay at-least-once и идемпотентный потребитель. https://www.conduktor.io/glossary/outbox-pattern-for-reliable-event-publishing
+- Helland, Communications of the ACM 55(5), 2012, и Kleppmann, *Designing Data-Intensive Applications*, 2017: повтор доставки не есть ровно один эффект. Как это ложится на эту шину — `docs/research/long-running-case.md`.
 - Kurrent, KurrentDB 25.1: атомарная запись в несколько потоков с ожидаемой версией на поток. https://kurrent.io/releases/kurrentdb/25-1
 - Redis, `XTRIM`: `~` с `LIMIT` по умолчанию 100 узлов потока, `DELREF`. https://redis.io/docs/latest/commands/xtrim/
 - Redis, `XPENDING`: счётчик доставок каждой ожидающей записи. https://redis.io/docs/latest/commands/xpending/
-- Strangler-миграция малыми обратимыми шагами. https://dev.to/oluwatosinolamilekan/from-monolith-to-modular-a-strangler-migration-playbook-527p
-- От модульного монолита к сервисам: модули через интерфейсы. https://dev.to/sepehr/from-monolith-to-modular-monolith-to-microservices-realistic-migration-patterns-36f2
-- Типизированные токены DI: `InjectionToken<T>` в Needle DI, `createToken<T>` в SuperDI. https://jsr.io/@needle-di/core/doc, https://github.com/piex/superdi
-- Цепочка поставок npm 2026: задержка свежих версий, разрешённый список install-скриптов. https://arrangeactassert.com/posts/the-package-manager-settings-that-would-have-blocked-the-axios-attack/
+- Fowler, *StranglerFigApplication*, 29 июня 2004: новый путь рядом со старым, система продолжает работать. https://martinfowler.com/bliki/StranglerFigApplication.html
+- Типизированные токены DI как образец формы, не как измерение этого дерева: `InjectionToken<T>` в Needle DI, `createToken<T>` в SuperDI. https://jsr.io/@needle-di/core/doc , https://github.com/piex/superdi
 
 ## Промт следующего прохода
 
